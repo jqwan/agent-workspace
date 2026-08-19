@@ -57,7 +57,7 @@ function parseModelsOutput(output) {
 
 function refreshModels() {
   return new Promise((resolve) => {
-    execFile(resolvePiBin(), ['--list-models'], { timeout: 30000, encoding: 'utf8' }, (error, stdout) => {
+    execFile(resolvePiBin(), ['--list-models'], { timeout: 30000, encoding: 'utf8', ...(process.platform === 'win32' ? { shell: true } : {}) }, (error, stdout) => {
       modelsCache = error
         ? { ...modelsCache, error: error.message }
         : { models: parseModelsOutput(stdout), updatedAt: new Date().toISOString(), error: null };
@@ -566,6 +566,12 @@ app.post('/api/select-directory', (_req, res) => {
   } else if (platform === 'linux') {
     command = 'zenity';
     args = ['--file-selection', '--directory', '--title=选择工作目录'];
+  } else if (platform === 'win32') {
+    command = 'powershell.exe';
+    args = [
+      '-NoProfile', '-STA', '-Command',
+      'Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = "选择工作目录"; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.SelectedPath) }',
+    ];
   } else {
     return res.status(501).json({ error: '当前系统暂不支持原生目录选择，请直接输入路径' });
   }
@@ -574,6 +580,7 @@ app.post('/api/select-directory', (_req, res) => {
       // Native pickers use a non-zero exit code when the user presses Cancel.
       if (platform === 'darwin' && error.code === 1) return res.json({ cancelled: true });
       if (platform === 'linux' && error.code === 1) return res.json({ cancelled: true });
+      if (platform === 'win32' && (error.code === 1 || error.code === 0)) return res.json({ cancelled: true });
       return res.status(500).json({ error: `打开目录选择器失败：${error.message}` });
     }
     const selected = String(stdout || '').trim();

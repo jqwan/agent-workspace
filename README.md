@@ -24,7 +24,7 @@ npm start
 - WebSocket 实时推送 snapshot 和事件，包括文本、思考过程、工具调用和工具输出
 - 支持 `/model`、`/thinking`、`/compact`、`/abort`、`/session`、`/models` 等 Slash Command
 - 支持 Enter 发送、Shift+Enter 换行、排队发送和终止执行
-- 工作目录支持绝对路径、`~` 路径及旧的 `projects/` 相对路径，并提供原生目录选择器
+- 工作目录支持绝对路径、`~` 路径及旧的 `projects/` 相对路径，并提供 macOS、Linux、Windows 原生目录选择器
 - 支持跟随系统、浅色和深色主题，选择保存于浏览器本地存储
 
 ## 使用流程
@@ -83,6 +83,17 @@ npm start
 - `POST /api/select-directory`：打开本机目录选择器
 - `GET /api/models`、`POST /api/models/refresh`：模型列表
 - `/ws`：WebSocket 实时会话通道
+
+## Windows 支持
+
+Windows 需要安装 Node.js 和 pi，并确保以下命令可以在 PowerShell 中执行：
+
+```powershell
+node --version
+pi --version
+```
+
+Web SDK 会话、任务管理和实时通信均支持 Windows。Windows 下会使用 PowerShell 目录选择器；旧的外部终端执行路径使用 `.cmd` 脚本和 `cmd.exe`。如果 `pi` 是 npm 安装的 `.cmd` 命令，请确保其目录已加入 `PATH`。
 
 ## 开发检查
 
