@@ -86,6 +86,8 @@ npm start
 
 ## Windows 支持
 
+完整的 Windows 安装与使用指南见 [`docs/windows.md`](docs/windows.md)。
+
 Windows 需要安装 Node.js 和 pi，并确保以下命令可以在 PowerShell 中执行：
 
 ```powershell
