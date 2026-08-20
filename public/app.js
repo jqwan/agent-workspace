@@ -6,6 +6,16 @@ const COLORS = { red: { label: '红色' }, orange: { label: '橙色' }, yellow: 
 const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
 const state = { tasks: [], status: '', sort: 'updated', search: '', signature: '', sessionTask: null, sessionSessionId: 'main', collapsedSessionTasks: new Set() };
 function taskColor(task) { return COLORS[task.color] ? task.color : (LEGACY_COLOR[task.priority] || 'blue'); }
+function recentWorkingDirs() {
+  let saved = [];
+  try { const parsed = JSON.parse(localStorage.getItem('workbench-working-dirs') || '[]'); if (Array.isArray(parsed)) saved = parsed; } catch { /* ignore malformed browser data */ }
+  return [...new Set([...saved, ...state.tasks.map((task) => task.workingDir)].filter(Boolean))].slice(0, 12);
+}
+function rememberWorkingDir(value) {
+  const dir = String(value || '').trim(); if (!dir) return;
+  const dirs = [dir, ...recentWorkingDirs().filter((item) => item !== dir)].slice(0, 12);
+  localStorage.setItem('workbench-working-dirs', JSON.stringify(dirs));
+}
 function applyTheme(theme) {
   document.body.classList.toggle('theme-light', theme === 'light');
   document.body.classList.toggle('theme-dark', theme === 'dark');
@@ -115,7 +125,8 @@ function card(t, compact = false) {
   const stats = t.stats || {};
   const archiveInfo = t.status === 'archived' ? `<div class="archive-info">已废弃 · ${time(t.archivedAt)} · ${t.purgeAt ? `预计 ${time(t.purgeAt)} 自动删除` : ''}</div>` : '';
   const statsHtml = compact ? '' : `<div class="task-stats"><span>会话 ${stats.sessions || 0}</span><span>消息 ${stats.messages || 0}</span><span>输入 ${formatCount(stats.inputTokens || 0)}</span><span>输出 ${formatCount(stats.outputTokens || 0)}</span><span>Token ${formatCount(stats.totalTokens || 0)}</span>${stats.cost ? `<span>成本 $${Number(stats.cost).toFixed(4)}</span>` : ''}</div>`;
-  return `<article class="card ${s.cls} color-${taskColor(t)}${compact ? ' compact' : ''}"><div class="card-head"><h3 class="card-title">${esc(t.title)}</h3><span class="spacer"></span>${t.deadline ? `<span class="deadline ${t.overdue ? 'overdue' : ''}">⏰ ${deadline(t.deadline)}${t.overdue ? ' 逾期' : ''}</span>` : ''}</div><p class="card-desc">${esc(t.description)}</p>${archiveInfo}${statsHtml}<div class="card-actions">${actions(t)}</div></article>`;
+  const folder = t.workingDir ? `<span class="task-folder" title="${esc(t.workingDir)}">📁 ${esc(t.workingDir)}</span>` : '';
+  return `<article class="card ${s.cls} color-${taskColor(t)}${compact ? ' compact' : ''}"><div class="card-head"><h3 class="card-title">${esc(t.title)}</h3>${folder}<span class="spacer"></span>${t.deadline ? `<span class="deadline ${t.overdue ? 'overdue' : ''}">⏰ ${deadline(t.deadline)}${t.overdue ? ' 逾期' : ''}</span>` : ''}</div><p class="card-desc">${esc(t.description)}</p>${archiveInfo}${statsHtml}<div class="card-actions">${actions(t)}</div></article>`;
 }
 function renderList() {
   document.body.classList.toggle('board-mode', !state.status);
@@ -132,7 +143,8 @@ function renderList() {
   $('#task-list').innerHTML = tasks.length ? tasks.map(card).join('') : '<div class="empty">没有符合条件的任务</div>';
 }
 function sessionTasks() {
-  return state.tasks.filter((task) => task.status === 'running' && Array.isArray(task.sessions) && task.sessions.length > 0);
+  // 任务执行按钮只准备会话，尚未发送消息时任务仍是 todo。
+  return state.tasks.filter((task) => ['todo', 'running'].includes(task.status) && Array.isArray(task.sessions) && task.sessions.length > 0);
 }
 function syncSessionTasks() {
   const select = $('#session-task-select'); if (!select) return;
@@ -159,17 +171,17 @@ function renderSessionTree() {
 }
 async function refresh() { try { const data = await api('/tasks'); const signature = JSON.stringify(data.tasks.map((t) => [t.id, t.status, t.updatedAt, t.activeSessionId, t.stats?.messages, t.stats?.totalTokens])); state.tasks = data.tasks; renderStats(); renderTaskSidebar(); syncSessionTasks(); renderSessionTree(); if (signature !== state.signature && !$('.modal')) renderList(); state.signature = signature; if (state.sessionTask && !sessionSocket && !$('.modal')) loadSession(); } catch (e) { toast(e.message, 'error'); } }
 function renderLiveSession() {
-  const box = $('#session-live'); if (!box) return;
-  const tools = liveSession.tools.map((t) => `🔧 ${esc(t.name)}${t.done ? (t.isError ? '（失败）' : '（完成）') : '（执行中）'}`).join('\\n');
-  const text = liveSession.text.trim();
-  if (!text && !tools) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-  box.classList.remove('hidden'); box.innerHTML = `${text ? `<div>🤖 ${esc(text)}</div>` : ''}${tools ? `<div class="hint">${esc(tools)}</div>` : ''}`;
+  // Live output belongs to the transcript, not to a separate banner. Keep the
+  // legacy banner hidden and re-render the current transcript item in place.
+  const box = $('#session-live');
+  if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+  if (sessionSnapshot) renderSessionSnapshot(sessionSnapshot);
 }
 function handleLiveEvent(event) {
-  if (event.type === 'message_start' && event.message?.role === 'assistant') liveSession.text = '';
+  if (event.type === 'message_start' && event.message?.role === 'assistant') { liveSession.text = ''; liveSession.pending = false; liveSession.ended = false; }
   if (event.type === 'message_update') {
     const update = event.assistantMessageEvent || {};
-    if (typeof update.delta === 'string' && (update.type === 'text_delta' || update.type === 'thinking_delta')) liveSession.text += update.delta;
+    if (typeof update.delta === 'string' && update.type === 'text_delta') liveSession.text += update.delta;
   }
   if (event.type === 'tool_execution_start') liveSession.tools.push({ name: event.toolName || 'tool', done: false });
   if (event.type === 'tool_execution_end') {
@@ -183,7 +195,7 @@ function handleLiveEvent(event) {
     else if (event.command === 'get_state') liveSession.text = `当前会话状态：\n${JSON.stringify(event.data || {}, null, 2)}`;
     else liveSession.text = `指令已执行：/${event.command}`;
   }
-  if (event.type === 'agent_end' || event.type === 'process_exit') liveSession = { text: '', tools: [] };
+  if (event.type === 'agent_end' || event.type === 'process_exit') liveSession = { text: '', tools: [], ended: true };
   renderLiveSession();
 }
 function toolTone(name = '') {
@@ -197,7 +209,15 @@ function sessionHtml(item) {
   const stamp = item.ts ? `<span class="session-meta">${time(item.ts)}</span>` : '';
   const identity = item.id ? ` data-msg-id="${esc(item.id)}"` : '';
   if (item.kind === 'user') return `<div class="session-item user"${identity}><div class="session-who">你${stamp}</div>${esc(item.text)}</div>`;
-  if (item.kind === 'assistant') { const tools = (item.toolCalls || []).map((x) => `<details class="tool-call tool-${toolTone(x.name)}"><summary>🔧 ${esc(x.name)}</summary><pre>${esc(x.args || '')}</pre></details>`).join(''); const thinking = item.thinking ? `<details class="thinking"><summary>💭 思考过程</summary><pre>${esc(item.thinking)}</pre></details>` : ''; const model = item.model ? ` · ${esc(item.model)}` : ''; return `<div class="session-item assistant"${identity}><div class="session-who">🤖 AI${model}${item.streaming ? ' · 生成中' : ''}${stamp}</div>${thinking}${renderMarkdown(item.text || '')}${tools}</div>`; }
+  if (item.kind === 'assistant') {
+    const tools = (item.toolCalls || []).map((x) => `<details class="tool-call tool-${toolTone(x.name)}"><summary>🔧 ${esc(x.name)}</summary><pre>${esc(x.args || '')}</pre></details>`).join('');
+    const thinking = item.thinking ? `<details class="thinking"><summary>💭 思考过程</summary><pre>${esc(item.thinking)}</pre></details>` : '';
+    const model = item.model ? ` · ${esc(item.model)}` : '';
+    const status = item.errorMessage ? ' · 失败' : item.streaming ? ' · 生成中' : item.stopReason === 'aborted' ? ' · 已中断' : '';
+    const error = item.errorMessage ? `<div class="session-error">⚠️ 模型请求失败：${esc(item.errorMessage)}</div>` : '';
+    const text = item.text ? renderMarkdown(item.text) : (!item.errorMessage && !item.thinking && !item.toolCalls?.length ? '<div class="session-empty">（没有文本输出）</div>' : '');
+    return `<div class="session-item assistant${item.errorMessage ? ' error' : ''}"${identity}><div class="session-who">🤖 AI${model}${status}${stamp}</div>${thinking}${error}${text}${tools}</div>`;
+  }
   if (item.kind === 'toolResult') return `<div class="session-item tool tool-${toolTone(item.toolName)} ${item.isError ? 'error' : ''}"${identity}><div class="session-who">🔧 ${esc(item.toolName)}${item.live ? ' · 执行中' : ''}${stamp}</div><pre>${esc(item.text)}</pre></div>`;
   return `<div class="session-item"${identity}>${esc(item.text)}${stamp}</div>`;
 }
@@ -211,8 +231,17 @@ function snapshotItems(snapshot) {
     const text = blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join('');
     const thinking = blocks.filter((b) => b.type === 'thinking').map((b) => b.thinking || '').join('');
     if (message.role === 'user') items.push({ id: message.id, kind: 'user', text, ts: message.timestamp });
-    else if (message.role === 'assistant') items.push({ id: message.id, kind: 'assistant', text, thinking, model: message.provider && message.model ? `${message.provider}/${message.model}` : '', ts: message.timestamp, streaming: message.id?.startsWith('stream-'), toolCalls: blocks.filter((b) => b.type === 'toolCall').map((b) => ({ name: b.name, args: b.argumentsText || '' })) });
+    else if (message.role === 'assistant') items.push({ id: message.id, kind: 'assistant', text, thinking, model: message.provider && message.model ? `${message.provider}/${message.model}` : '', stopReason: message.stopReason, errorMessage: message.errorMessage, ts: message.timestamp, streaming: message.id?.startsWith('stream-'), toolCalls: blocks.filter((b) => b.type === 'toolCall').map((b) => ({ name: b.name, args: b.argumentsText || '' })) });
     else if (message.role === 'toolResult') items.push({ id: message.id, kind: 'toolResult', toolName: message.toolName || '', isError: message.isError, text, ts: message.timestamp });
+  }
+  const hasCurrentStream = Boolean(snapshot.streamingMessage);
+  const liveError = Boolean(liveSession.error);
+  const lastUserIndex = messages.map((message, index) => message.role === 'user' ? index : -1).reduce((latest, index) => Math.max(latest, index), -1);
+  const currentTurn = messages.slice(lastUserIndex + 1);
+  const hasFinishedCurrentTurn = currentTurn.some((message) => message.role === 'assistant' && ['stop', 'length', 'error', 'aborted'].includes(message.stopReason));
+  const liveActive = !liveSession.ended && !hasFinishedCurrentTurn && (snapshot.isStreaming || liveSession.text || liveSession.pending);
+  if ((!hasCurrentStream || liveError) && liveActive) {
+    items.push({ id: 'live-current', kind: 'assistant', text: liveError ? '' : (liveSession.text || 'working ……'), errorMessage: liveError ? liveSession.text : null, ts: Date.now(), streaming: snapshot.isStreaming || liveSession.pending });
   }
   for (const [toolCallId, output] of liveToolOutputs) {
     const status = liveToolStatuses.get(toolCallId);
@@ -324,6 +353,7 @@ function selectSession(id, sessionId = 'main') {
   sessionSocket.onmessage = (message) => {
     try {
       const event = JSON.parse(message.data);
+      if (event.type !== 'snapshot') handleLiveEvent(event);
       if (event.type === 'snapshot') { if (event.state?.childSessionId) { state.sessionSessionId = event.state.childSessionId; renderSessionHeader(); renderSessionTree(); } renderSessionSnapshot(event.state); }
       else if (event.type === 'tool_execution_start') {
         liveToolStatuses.set(event.toolCallId, { toolName: event.toolName || 'tool', isError: false });
@@ -337,7 +367,12 @@ function selectSession(id, sessionId = 'main') {
       } else if (event.type === 'model_list') renderModelPicker(event.models);
       else if (event.type === 'thinking_list') renderThinkingPicker(event.levels, event.current);
       else if (event.type === 'notice') toast(event.text || '指令已执行');
-      else if (event.type === 'error') toast(event.error || '会话错误', 'error');
+      else if (event.type === 'error') {
+        const text = event.error || '会话错误';
+        liveSession = { text, tools: [], error: true };
+        renderLiveSession();
+        toast(text, 'error');
+      }
     } catch { /* ignore malformed websocket data */ }
   };
   sessionSocket.onerror = () => { toast('WebSocket 会话连接失败，正在使用日志视图', 'error'); sessionSocket = null; loadSession(); };
@@ -350,16 +385,30 @@ function closeModal() { $('#modal-root').innerHTML = ''; }
 
 function openTaskForm(task = null) {
   const selectedColor = taskColor(task || {});
-  const m = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label>标题<input id="task-title" value="${task ? esc(task.title) : ''}" placeholder="例如：整理项目测试结果"></label><label>内容描述（将作为 pi agent 的执行指令）<textarea id="task-desc" rows="7" placeholder="详细描述希望 AI 完成的工作…">${task ? esc(task.description) : ''}</textarea></label><div class="row"><label>颜色标签<div id="color-picker" class="color-picker">${Object.entries(COLORS).map(([key, value]) => `<button type="button" class="color-option color-${key}${selectedColor === key ? ' active' : ''}" data-color-value="${key}" aria-label="${value.label}" title="${value.label}"><span></span></button>`).join('')}</div><input type="hidden" id="task-color" value="${selectedColor}"></label><label>截止时间<input id="task-deadline" type="datetime-local" value="${task?.deadline || ''}"></label></div><div class="modal-actions"><button class="primary" id="save-task">${task ? '保存' : '创建'}</button><button data-close>取消</button></div>`);
+  const initialDeadline = task?.deadline || '';
+  const initialWorkingDir = task?.workingDir || '';
+  const recentDirOptions = recentWorkingDirs().map((dir) => `<option value="${esc(dir)}">${esc(dir)}</option>`).join('');
+  const m = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label>标题<input id="task-title" value="${task ? esc(task.title) : ''}" placeholder="例如：整理项目测试结果"></label><label>工作目录路径（必填）<div class="path-picker-row"><input id="task-working-dir" value="${esc(initialWorkingDir)}" placeholder="例如：C:\\Projects\\demo 或 ~/projects/demo"><select id="recent-task-dir" aria-label="选择已使用的文件夹"><option value="">选择已使用的文件夹</option>${recentDirOptions}</select><button type="button" id="choose-task-dir">选择文件夹</button></div></label><label>内容描述（可留空）<textarea id="task-desc" rows="7" placeholder="详细描述希望 AI 完成的工作…">${task ? esc(task.description) : ''}</textarea></label><div class="row"><label>颜色标签<div id="color-picker" class="color-picker">${Object.entries(COLORS).map(([key, value]) => `<button type="button" class="color-option color-${key}${selectedColor === key ? ' active' : ''}" data-color-value="${key}" aria-label="${value.label}" title="${value.label}"><span></span></button>`).join('')}</div><input type="hidden" id="task-color" value="${selectedColor}"></label><label>截止时间<input id="task-deadline" type="datetime-local" value="${esc(initialDeadline)}"></label></div><div class="modal-actions"><button class="primary" id="save-task">${task ? '保存' : '创建'}</button><button data-close>取消</button></div>`);
   $('[data-close]', m).onclick = closeModal;
   m.querySelectorAll('[data-color-value]').forEach((button) => { button.onclick = () => { $('#task-color', m).value = button.dataset.colorValue; m.querySelectorAll('[data-color-value]').forEach((item) => item.classList.toggle('active', item === button)); }; });
-  $('#save-task', m).onclick = async () => { try { const body = { title: $('#task-title', m).value, description: $('#task-desc', m).value, color: $('#task-color', m).value, deadline: $('#task-deadline', m).value || null }; await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body }); closeModal(); toast(task ? '任务已保存' : '任务已创建'); refresh(); } catch (e) { toast(e.message, 'error'); } };
+  $('#recent-task-dir', m).onchange = (event) => { if (event.target.value) { $('#task-working-dir', m).value = event.target.value; event.target.value = ''; } };
+  $('#choose-task-dir', m).onclick = async () => { const picker = $('#choose-task-dir', m); picker.disabled = true; try { const result = await api('/select-directory', { method: 'POST' }); if (result.path) { rememberWorkingDir(result.path); $('#task-working-dir', m).value = result.path; $('#task-working-dir', m).focus(); } } catch (error) { toast(error.message, 'error'); } finally { picker.disabled = false; } };
+  const deadlineInput = $('#task-deadline', m);
+  $('#save-task', m).onclick = async () => { try { const workingDir = $('#task-working-dir', m).value.trim(); if (!workingDir) return toast('请选择工作目录', 'error'); rememberWorkingDir(workingDir); const body = { title: $('#task-title', m).value, description: $('#task-desc', m).value, workingDir, color: $('#task-color', m).value, deadline: deadlineInput.value || null }; await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body }); closeModal(); toast(task ? '任务已保存' : '任务已创建'); refresh(); } catch (e) { toast(e.message, 'error'); } };
 }
 async function openExecute(task) {
-  const m = modal(`<h2>执行任务：${esc(task.title)}</h2><p class="hint">可使用任意本地目录作为工作目录，开始后将自动进入对应会话。</p><label>工作目录路径<div class="path-picker-row"><input id="exec-dir" value="${esc(task.workingDir || '')}" placeholder="例如：/Users/your-name/projects/demo 或 ~/projects/demo"><button type="button" id="choose-dir">选择文件夹</button></div></label><label>本次执行描述<textarea id="exec-description" rows="8" placeholder="描述希望 AI 完成的工作…">${esc(task.description)}</textarea></label><div class="modal-actions"><button class="primary" id="start-exec">开始执行</button><button data-close>取消</button></div>`);
-  $('[data-close]', m).onclick = closeModal;
-  $('#choose-dir', m).onclick = async () => { const picker = $('#choose-dir', m); picker.disabled = true; try { const result = await api('/select-directory', { method: 'POST' }); if (result.path) { $('#exec-dir', m).value = result.path; $('#exec-dir', m).focus(); } } catch (error) { toast(error.message, 'error'); } finally { picker.disabled = false; } };
-  $('#start-exec', m).onclick = async () => { const dir = $('#exec-dir', m).value.trim(); if (!dir) return toast('请输入工作目录路径', 'error'); const button = $('#start-exec', m); button.disabled = true; try { const result = await api(`/tasks/${task.id}/execute`, { method: 'POST', body: { workingDir: dir, description: $('#exec-description', m).value } }); closeModal(); toast('已开始执行'); await refresh(); switchModule('session'); selectSession(task.id, result.task?.activeSessionId || 'main'); } catch (e) { button.disabled = false; toast(e.message, 'error'); } };
+  if (!task.workingDir) { toast('请先为任务设置工作目录', 'error'); openTaskForm(task); return; }
+  try {
+    const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
+    await refresh();
+    switchModule('session');
+    selectSession(task.id, result.session.id);
+    const input = $('#session-input');
+    input.value = task.description || '';
+    resizeSessionInput();
+    input.focus();
+    toast('已进入新会话，请确认消息后发送');
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function openDeleteTaskModal(task) {
@@ -469,6 +518,8 @@ async function sendSessionMessage(queue = false) {
       const isCommand = message.startsWith('/');
       await api(isCommand ? `/tasks/${task.id}/command` : `/tasks/${task.id}/reply`, { method: 'POST', body: isCommand ? { command: message } : { message } });
     }
+    liveSession = { text: '', tools: [], pending: true };
+    renderLiveSession();
     input.value = '';
     resizeSessionInput();
     updateCommandMenu();

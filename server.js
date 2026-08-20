@@ -252,8 +252,10 @@ function concurrencyFull(extra = 0) {
 app.get('/api/tasks', (_req, res) => res.json({ tasks: listTasks().map(publicTask) }));
 app.post('/api/tasks', (req, res) => {
   const body = req.body || {};
-  if (!String(body.title || '').trim() || !String(body.description || '').trim()) return res.status(400).json({ error: '标题和内容描述不能为空' });
-  res.json({ task: publicTask(createTask(body)) });
+  if (!String(body.title || '').trim()) return res.status(400).json({ error: '标题不能为空' });
+  const workingDir = resolveWorkingDir(body.workingDir);
+  if (!workingDir) return res.status(400).json({ error: '请选择工作目录' });
+  res.json({ task: publicTask(createTask({ ...body, workingDir })) });
 });
 app.put('/api/tasks/:id', (req, res) => {
   const task = getTask(req.params.id);
@@ -262,8 +264,12 @@ app.put('/api/tasks/:id', (req, res) => {
   if (task.status === 'archived') return res.status(409).json({ error: '已废弃任务不能编辑' });
   const patch = {};
   for (const key of ['title', 'description', 'color', 'deadline']) if (key in (req.body || {})) patch[key] = req.body[key];
+  if ('workingDir' in (req.body || {})) {
+    patch.workingDir = resolveWorkingDir(req.body.workingDir);
+    if (!patch.workingDir) return res.status(400).json({ error: '请选择工作目录' });
+  }
   if ('title' in patch && !String(patch.title).trim()) return res.status(400).json({ error: '标题不能为空' });
-  if ('description' in patch && !String(patch.description).trim()) return res.status(400).json({ error: '内容描述不能为空' });
+  if ('description' in patch) patch.description = String(patch.description || '').trim();
   res.json({ task: publicTask(updateTask(task.id, patch)) });
 });
 app.delete('/api/tasks/:id', (req, res) => {
@@ -315,10 +321,16 @@ app.get('/api/tasks/:id/sessions', (req, res) => {
 app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (task.status === 'done' || task.status === 'archived') return res.status(409).json({ error: '当前任务状态不能新建会话' });
+  const patch = {};
+  if (req.body?.workingDir !== undefined) {
+    patch.workingDir = resolveWorkingDir(req.body.workingDir);
+    if (!patch.workingDir) return res.status(400).json({ error: '工作目录路径不能为空或不合法' });
+  }
   const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);
-  updateTask(task.id, { sessions });
+  updateTask(task.id, { ...patch, sessions });
   res.json({ session, task: publicTask(getTask(task.id)) });
 });
 app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {
@@ -361,10 +373,7 @@ app.post('/api/tasks/:id/execute', async (req, res) => {
     if (concurrencyFull()) return res.status(409).json({ error: `已达到并发上限：${config.maxConcurrent}` });
     const body = req.body || {};
     const patch = { thinkingLevel: body.thinkingLevel || null, readOnly: body.readOnly !== undefined ? Boolean(body.readOnly) : task.readOnly };
-    if (body.description !== undefined) {
-      patch.description = String(body.description || '').trim();
-      if (!patch.description) return res.status(400).json({ error: '内容描述不能为空' });
-    }
+    if (body.description !== undefined) patch.description = String(body.description || '').trim();
     if (body.workingDir !== undefined) {
       patch.workingDir = resolveWorkingDir(body.workingDir);
       if (!patch.workingDir) return res.status(400).json({ error: '工作目录路径不能为空或不合法' });
@@ -531,7 +540,7 @@ webSockets.on('connection', (ws) => {
         const text = String(message.text || '').trim();
         if (!text) return;
         if (text.startsWith('/')) await executeWebCommand(task, text);
-        else if (task.status !== 'running' && task.status !== 'review') throw new Error('当前任务状态不能继续对话');
+        else if (!['todo', 'running', 'review'].includes(task.status)) throw new Error('当前任务状态不能继续对话');
         else {
           if (task.status !== 'running' && concurrencyFull(1)) throw new Error(`已达到并发上限：${config.maxConcurrent}`);
           nameSessionFromPrompt(task, activeSessionIds.get(task.id), text);
@@ -556,6 +565,39 @@ webSockets.on('connection', (ws) => {
 });
 
 // 元数据
+function selectWindowsDirectory(res) {
+  // FolderBrowserDialog is available on both Windows 10 and 11. Use UTF-8
+  // explicitly so paths containing Chinese characters survive PowerShell's
+  // console encoding, and fall back to pwsh when powershell.exe is absent.
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '[System.Windows.Forms.Application]::EnableVisualStyles()',
+    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+    '$dialog.Description = "选择工作目录"',
+    '$dialog.ShowNewFolderButton = $true',
+    '$result = $dialog.ShowDialog()',
+    'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($dialog.SelectedPath) }',
+  ].join('; ');
+  const args = ['-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script];
+  const commands = ['powershell.exe', 'pwsh.exe'];
+  let index = 0;
+  const run = () => execFile(commands[index], args, {
+    timeout: 120000, encoding: 'utf8', windowsHide: true, maxBuffer: 1024 * 1024,
+  }, (error, stdout) => {
+    if (error?.code === 'ENOENT' && index < commands.length - 1) {
+      index += 1;
+      return run();
+    }
+    if (error) return res.status(500).json({ error: `打开 Windows 目录选择器失败：${error.message}` });
+    const selected = String(stdout || '').replace(/^\uFEFF/, '').trim();
+    if (!selected) return res.json({ cancelled: true });
+    res.json({ path: selected });
+  });
+  run();
+}
+
 app.post('/api/select-directory', (_req, res) => {
   const platform = process.platform;
   let command;
@@ -567,11 +609,7 @@ app.post('/api/select-directory', (_req, res) => {
     command = 'zenity';
     args = ['--file-selection', '--directory', '--title=选择工作目录'];
   } else if (platform === 'win32') {
-    command = 'powershell.exe';
-    args = [
-      '-NoProfile', '-STA', '-Command',
-      'Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = "选择工作目录"; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.SelectedPath) }',
-    ];
+    return selectWindowsDirectory(res);
   } else {
     return res.status(501).json({ error: '当前系统暂不支持原生目录选择，请直接输入路径' });
   }
@@ -580,7 +618,6 @@ app.post('/api/select-directory', (_req, res) => {
       // Native pickers use a non-zero exit code when the user presses Cancel.
       if (platform === 'darwin' && error.code === 1) return res.json({ cancelled: true });
       if (platform === 'linux' && error.code === 1) return res.json({ cancelled: true });
-      if (platform === 'win32' && (error.code === 1 || error.code === 0)) return res.json({ cancelled: true });
       return res.status(500).json({ error: `打开目录选择器失败：${error.message}` });
     }
     const selected = String(stdout || '').trim();
