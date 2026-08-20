@@ -2,18 +2,22 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
   ROOT, DATA_DIR, SESSIONS_DIR, PROJECTS_ROOT, CONFIG_FILE,
   loadTasks, listTasks, getTask, createTask, updateTask, deleteTask,
 } from './lib/store.js';
 import { parseSessionFile, evaluateRunningTask, extractText } from './lib/session.js';
-import { findPiPids, killPi, resolvePiBin } from './lib/executor.js';
-import { startWebPi, stopWebPi, sendWebPrompt, sendWebCommand, isWebPiRunning, getWebEvents, getWebState, subscribeWebPi } from './lib/web-executor.js';
+import { findPiPids, killPi } from './lib/executor.js';
+import {
+  startWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
+  isWebTuiRunning, subscribeWebTui, claimWebTuiInput, releaseWebTuiInput,
+} from './lib/tui-executor.js';
 
-const DEFAULT_CONFIG = { port: 7777, maxConcurrent: 0, terminalApp: 'auto', approvePi: true };
+const DEFAULT_CONFIG = { port: 7777, maxConcurrent: 0, approvePi: true };
 const activeSessionIds = new Map();
+const tuiOpenings = new Map();
 let config = { ...DEFAULT_CONFIG };
 try {
   if (existsSync(CONFIG_FILE)) config = { ...config, ...JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) };
@@ -23,49 +27,11 @@ function saveConfig() {
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-const tokenFile = path.join(DATA_DIR, 'auth-token');
-let authToken;
-if (existsSync(tokenFile)) authToken = readFileSync(tokenFile, 'utf8').trim();
-else {
-  mkdirSync(DATA_DIR, { recursive: true });
-  authToken = randomBytes(16).toString('hex');
-  writeFileSync(tokenFile, `${authToken}\n`, { mode: 0o600 });
-}
-
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+app.use('/vendor/xterm', express.static(path.join(ROOT, 'node_modules', '@xterm', 'xterm')));
+app.use('/vendor/xterm-fit', express.static(path.join(ROOT, 'node_modules', '@xterm', 'addon-fit', 'lib')));
 app.use(express.static(path.join(ROOT, 'public')));
-
-let modelsCache = { models: [], updatedAt: null, error: null };
-try {
-  const file = path.join(DATA_DIR, 'models-cache.json');
-  if (existsSync(file)) modelsCache = JSON.parse(readFileSync(file, 'utf8'));
-} catch { /* ignore */ }
-
-function parseModelsOutput(output) {
-  const models = [];
-  for (const line of String(output).trim().split('\n')) {
-    const cells = line.trim().split(/\s+/);
-    if (cells.length < 2 || cells[0] === 'provider') continue;
-    models.push({
-      provider: cells[0], id: cells[1], label: `${cells[0]} / ${cells[1]}`,
-      context: cells[2] || '', thinking: cells[4] === 'yes',
-    });
-  }
-  return models;
-}
-
-function refreshModels() {
-  return new Promise((resolve) => {
-    execFile(resolvePiBin(), ['--list-models'], { timeout: 30000, encoding: 'utf8', ...(process.platform === 'win32' ? { shell: true } : {}) }, (error, stdout) => {
-      modelsCache = error
-        ? { ...modelsCache, error: error.message }
-        : { models: parseModelsOutput(stdout), updatedAt: new Date().toISOString(), error: null };
-      try { writeFileSync(path.join(DATA_DIR, 'models-cache.json'), JSON.stringify(modelsCache, null, 2)); } catch { /* ignore */ }
-      resolve(modelsCache);
-    });
-  });
-}
 
 function nowIso() { return new Date().toISOString(); }
 function taskSessions(task) {
@@ -84,37 +50,23 @@ function sessionTitleFromPrompt(text) {
   if (!title) return '新会话';
   return title.length > 28 ? `${title.slice(0, 28)}…` : title;
 }
-function nameSessionFromPrompt(task, sessionId, prompt) {
-  const session = resolveTaskSession(task, sessionId);
-  if (!session || (session.title && session.title !== '主会话' && session.title !== '新会话')) return session;
-  let firstPrompt = prompt;
-  const existing = parseSessionFile(session.sessionFile);
-  for (const entry of existing.entries) {
-    if (entry.type === 'message' && entry.message?.role === 'user') {
-      const text = extractText(entry.message.content).trim();
-      if (text) { firstPrompt = text; break; }
-    }
-  }
-  session.title = sessionTitleFromPrompt(firstPrompt);
-  session.updatedAt = nowIso();
-  updateTask(task.id, { sessions: taskSessions(task) });
-  return session;
-}
-function resolveTerminalApp() {
-  if (config.terminalApp && config.terminalApp !== 'auto') return config.terminalApp;
-  const home = process.env.HOME || '';
-  return ['/Applications/iTerm.app', path.join(home, 'Applications/iTerm.app')].some(existsSync) ? 'iTerm2' : 'Terminal';
-}
-function publicSession(task, child) {
+function publicSession(child) {
   if (child.title && child.title !== '主会话' && child.title !== '新会话') return child;
   const parsed = parseSessionFile(child.sessionFile);
   for (const entry of parsed.entries) {
-    if (entry.type === 'message' && entry.message?.role === 'user') {
-      const text = extractText(entry.message.content).trim();
-      if (text) return { ...child, title: sessionTitleFromPrompt(text) };
-    }
+    if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
+    const text = extractText(entry.message.content).trim();
+    if (text) return { ...child, title: sessionTitleFromPrompt(text) };
   }
   return child;
+}
+function persistSessionTitle(task, child) {
+  if (!child || (child.title && child.title !== '主会话' && child.title !== '新会话')) return;
+  const shown = publicSession(child).title;
+  if (!shown || shown === child.title) return;
+  child.title = shown;
+  child.updatedAt = nowIso();
+  updateTask(task.id, { sessions: taskSessions(task) });
 }
 function taskStats(task) {
   const stats = { sessions: 0, messages: 0, userMessages: 0, assistantMessages: 0, toolResults: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0, errors: 0 };
@@ -144,108 +96,83 @@ function publicTask(task) {
   const displayStatus = internalStatus === 'todo' ? 'todo' : internalStatus === 'done' ? 'done' : internalStatus === 'archived' ? 'archived' : 'running';
   const allSessions = taskSessions(task);
   const started = Boolean(task.lastRun) || allSessions.some((child) => Boolean(parseSessionFile(child.sessionFile).stats?.messages));
-  // The automatically-created main session is an implementation detail. Do
-  // not expose it until the task has actually started; explicitly-created
-  // child sessions remain visible.
   const visibleSessions = allSessions.filter((child) => started || child.id !== 'main');
   return {
     ...task,
     status: displayStatus,
-    sessions: visibleSessions.map((child) => publicSession(task, child)),
+    sessions: visibleSessions.map(publicSession),
     activeSessionId: activeSessionIds.get(task.id) || visibleSessions[0]?.id || null,
     stats: taskStats(task),
     overdue: Boolean(task.deadline && !['done', 'archived'].includes(internalStatus) && new Date(task.deadline).getTime() < Date.now()),
-    piRunning: internalStatus === 'running' && isWebPiRunning(task.id),
+    piRunning: isWebTuiRunning(task.id),
   };
 }
 function resolveWorkingDir(value) {
   let input = String(value || '').trim();
   if (!input || input.includes('\0')) return null;
   if (input === '~' || input.startsWith('~/')) input = path.join(process.env.HOME || '', input.slice(1));
-  // Keep old task values working: relative paths still resolve from projects/.
+  // path.isAbsolute follows the host default. Check win32 explicitly too so
+  // persisted C:\\... and UNC paths remain absolute in every Windows shell.
+  if (path.win32.isAbsolute(input)) return path.win32.normalize(input);
   return path.resolve(path.isAbsolute(input) ? input : path.join(PROJECTS_ROOT, input));
 }
-
+function concurrencyFull(extra = 0) {
+  return config.maxConcurrent > 0 && listTasks().filter((task) => task.status === 'running').length + extra > config.maxConcurrent;
+}
 function removeTaskFiles(task) {
   for (const child of taskSessions(task)) {
     killPi(child.sessionFile);
     try { if (existsSync(child.sessionFile)) unlinkSync(child.sessionFile); } catch { /* ignore */ }
   }
 }
-function purgeArchivedTasks() {
+async function stopTaskTui(taskId, options) {
+  return stopWebTuiAndWait(taskId, options);
+}
+async function purgeArchivedTasks() {
   const cutoff = Date.now();
   for (const task of listTasks()) {
     if (task.status !== 'archived' || !task.purgeAt || new Date(task.purgeAt).getTime() > cutoff) continue;
-    stopWebPi(task.id);
+    await stopTaskTui(task.id, { silent: true });
     removeTaskFiles(task);
     activeSessionIds.delete(task.id);
     deleteTask(task.id);
   }
 }
-function settleWebTurn(taskId) {
-  const current = getTask(taskId);
-  if (!current || current.status !== 'running') return;
-  const verdict = evaluateRunningTask(current, { findPiPids });
-  if (verdict) updateTask(current.id, { status: verdict.state, lastRun: verdict.lastRun });
-  else updateTask(current.id, { status: 'review', lastRun: { status: 'done', reason: null, at: nowIso() } });
+function withTuiLock(taskId, action) {
+  const previous = tuiOpenings.get(taskId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(action);
+  tuiOpenings.set(taskId, current);
+  return current.finally(() => {
+    if (tuiOpenings.get(taskId) === current) tuiOpenings.delete(taskId);
+  });
 }
-async function openTaskSession(task, childSession = resolveTaskSession(task)) {
+async function openTaskTui(task, childSession, cols, rows, theme) {
   if (!childSession) throw new Error('任务没有可用子会话');
-  activeSessionIds.set(task.id, childSession.id);
+  if (task.status === 'done' || task.status === 'archived') throw new Error('当前任务状态不能打开原生 TUI');
   const workingDir = resolveWorkingDir(task.workingDir);
+  if (!workingDir) throw new Error('请先为任务设置工作目录');
   mkdirSync(workingDir, { recursive: true });
-  await startWebPi({
-    taskId: task.id, childSessionId: childSession.id, workingDir, sessionFile: childSession.sessionFile, title: childSession.title || task.title,
-    provider: task.modelProvider, model: task.model, thinkingLevel: task.thinkingLevel,
-    readOnly: task.readOnly, approve: config.approvePi !== false,
-    onEvent: (event) => { if (event.type === 'agent_end') setTimeout(() => settleWebTurn(task.id), 250); },
-    onExit: ({ code, error }) => {
-      setTimeout(() => {
-        const current = getTask(task.id);
-        if (!current || current.status !== 'running') return;
-        const verdict = evaluateRunningTask(current, { findPiPids: () => [] });
-        if (verdict) updateTask(current.id, { status: verdict.state, lastRun: verdict.lastRun });
-        else updateTask(current.id, { status: 'review', lastRun: { status: error || code !== 0 ? 'failed' : 'terminated', reason: error?.message || (code !== 0 ? `pi 异常退出（exit code ${code}）` : 'pi 已退出但没有完整响应'), at: nowIso() } });
-      }, 500);
+  activeSessionIds.set(task.id, childSession.id);
+  const record = await startWebTui({
+    taskId: task.id, childSessionId: childSession.id, workingDir, sessionFile: childSession.sessionFile,
+    title: childSession.title || task.title, provider: task.modelProvider, model: task.model,
+    thinkingLevel: task.thinkingLevel, readOnly: task.readOnly, approve: config.approvePi !== false,
+    cols, rows, theme: theme === 'dark' ? 'dark' : 'light',
+    onExit: ({ exitCode }) => {
+      const current = getTask(task.id);
+      if (!current) return;
+      const currentSession = resolveTaskSession(current, childSession.id);
+      persistSessionTitle(current, currentSession);
+      if (current.status !== 'running') return;
+      updateTask(task.id, { status: 'review', lastRun: {
+        status: exitCode === 0 ? 'done' : 'terminated',
+        reason: exitCode === 0 ? null : `原生 TUI 已退出（exit code ${exitCode}）`, at: nowIso(),
+      }});
     },
   });
-}
-async function launchPi(task, prompt, sessionId) {
-  const childSession = resolveTaskSession(task, sessionId);
-  await openTaskSession(task, childSession);
-  nameSessionFromPrompt(task, childSession.id, prompt);
-  // AgentSession.prompt() resolves after the whole turn. Do not hold the HTTP
-  // request open while the model is working; SDK events drive the WebSocket.
-  void sendWebPrompt(task.id, prompt).catch((error) => {
-    updateTask(task.id, { status: 'review', lastRun: { status: 'failed', reason: `执行失败：${error.message}`, at: nowIso() } });
-  });
-}
-async function startRun(task, prompt, sessionId) {
-  try {
-    const childSession = resolveTaskSession(task, sessionId);
-    if (!childSession) throw new Error('任务没有可用子会话');
-    const activeState = getWebState(task.id);
-    const sameSession = isWebPiRunning(task.id) && activeState?.childSessionId === childSession.id;
-    activeSessionIds.set(task.id, childSession.id);
-    nameSessionFromPrompt(task, childSession.id, prompt);
-    if (!sameSession) {
-      stopWebPi(task.id);
-      killPi(childSession.sessionFile);
-      updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
-      await launchPi(getTask(task.id), prompt, childSession.id);
-    } else {
-      updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
-      void sendWebPrompt(task.id, prompt).catch((error) => {
-        updateTask(task.id, { status: 'review', lastRun: { status: 'failed', reason: `执行失败：${error.message}`, at: nowIso() } });
-      });
-    }
-  } catch (error) {
-    updateTask(task.id, { status: 'review', lastRun: { status: 'failed', reason: `启动失败：${error.message}`, at: nowIso() } });
-    throw error;
-  }
-}
-function concurrencyFull(extra = 0) {
-  return config.maxConcurrent > 0 && listTasks().filter((t) => t.status === 'running').length + extra > config.maxConcurrent;
+  const current = getTask(task.id);
+  if (current?.status !== 'running') updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
+  return record;
 }
 
 // 任务 CRUD
@@ -272,10 +199,20 @@ app.put('/api/tasks/:id', (req, res) => {
   if ('description' in patch) patch.description = String(patch.description || '').trim();
   res.json({ task: publicTask(updateTask(task.id, patch)) });
 });
-app.delete('/api/tasks/:id', (req, res) => {
+app.delete('/api/tasks/archived', async (_req, res) => {
+  const archived = listTasks().filter((task) => task.status === 'archived');
+  for (const task of archived) {
+    await stopTaskTui(task.id, { silent: true });
+    removeTaskFiles(task);
+    activeSessionIds.delete(task.id);
+    deleteTask(task.id);
+  }
+  res.json({ removed: archived.length });
+});
+app.delete('/api/tasks/:id', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  stopWebPi(task.id);
+  await stopTaskTui(task.id, { silent: true });
   for (const child of taskSessions(task)) killPi(child.sessionFile);
   activeSessionIds.delete(task.id);
   const archivedAt = nowIso();
@@ -288,20 +225,20 @@ app.post('/api/tasks/:id/restore', (req, res) => {
   if (task.status !== 'archived') return res.status(409).json({ error: '只有已废弃任务可以恢复' });
   res.json({ task: publicTask(updateTask(task.id, { status: 'todo', archivedAt: null, purgeAt: null })) });
 });
-app.delete('/api/tasks/:id/permanent', (req, res) => {
+app.delete('/api/tasks/:id/permanent', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  stopWebPi(task.id);
+  await stopTaskTui(task.id, { silent: true });
   removeTaskFiles(task);
   activeSessionIds.delete(task.id);
   deleteTask(task.id);
   res.json({ ok: true });
 });
-app.post('/api/tasks/:id/complete', (req, res) => {
+app.post('/api/tasks/:id/complete', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (!['todo', 'review'].includes(task.status)) return res.status(409).json({ error: '当前状态不能标记完成' });
-  stopWebPi(task.id);
+  await stopTaskTui(task.id, { silent: true });
   killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
   res.json({ task: publicTask(updateTask(task.id, { status: 'done', completedAt: nowIso() })) });
 });
@@ -312,7 +249,7 @@ app.post('/api/tasks/:id/reopen', (req, res) => {
   res.json({ task: publicTask(updateTask(task.id, { status: 'review', completedAt: null, lastRun: { status: 'reopened', reason: '任务已重新打开', at: nowIso() } })) });
 });
 
-// 执行与回复
+// 子会话仅保存 pi JSONL 的入口信息；交互全部在原生 TUI 完成。
 app.get('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
@@ -322,15 +259,10 @@ app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (task.status === 'done' || task.status === 'archived') return res.status(409).json({ error: '当前任务状态不能新建会话' });
-  const patch = {};
-  if (req.body?.workingDir !== undefined) {
-    patch.workingDir = resolveWorkingDir(req.body.workingDir);
-    if (!patch.workingDir) return res.status(400).json({ error: '工作目录路径不能为空或不合法' });
-  }
   const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);
-  updateTask(task.id, { ...patch, sessions });
+  updateTask(task.id, { sessions });
   res.json({ session, task: publicTask(getTask(task.id)) });
 });
 app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {
@@ -344,17 +276,15 @@ app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {
   updateTask(task.id, { sessions: taskSessions(task) });
   res.json({ session, task: publicTask(getTask(task.id)) });
 });
-app.delete('/api/tasks/:id/sessions/:sessionId', (req, res) => {
+app.delete('/api/tasks/:id/sessions/:sessionId', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   const sessions = taskSessions(task);
   if (sessions.length <= 1) return res.status(409).json({ error: '至少保留一个子会话' });
   const index = sessions.findIndex((item) => item.id === req.params.sessionId);
   if (index < 0) return res.status(404).json({ error: '子会话不存在' });
-  const activeState = getWebState(task.id);
-  if (activeState?.childSessionId === req.params.sessionId && activeState.isStreaming) return res.status(409).json({ error: '子会话执行中，不能删除' });
   const [removed] = sessions.splice(index, 1);
-  if (activeState?.childSessionId === removed.id) stopWebPi(task.id);
+  if (isWebTuiRunning(task.id) && activeSessionIds.get(task.id) === removed.id) await stopTaskTui(task.id, { silent: true });
   try { if (existsSync(removed.sessionFile)) unlinkSync(removed.sessionFile); } catch { /* ignore */ }
   const patch = { sessions };
   if (task.sessionFile === removed.sessionFile) patch.sessionFile = sessions[0].sessionFile;
@@ -362,234 +292,87 @@ app.delete('/api/tasks/:id/sessions/:sessionId', (req, res) => {
   updateTask(task.id, patch);
   res.json({ ok: true, task: publicTask(getTask(task.id)) });
 });
-
-app.post('/api/tasks/:id/execute', async (req, res) => {
-  try {
-    const task = getTask(req.params.id);
-    if (!task) return res.status(404).json({ error: '任务不存在' });
-    if (task.status === 'running') return res.status(409).json({ error: '任务正在执行中' });
-    if (task.status === 'done') return res.status(409).json({ error: '请先重开已完成任务' });
-    if (task.status === 'archived') return res.status(409).json({ error: '已废弃任务请先恢复' });
-    if (concurrencyFull()) return res.status(409).json({ error: `已达到并发上限：${config.maxConcurrent}` });
-    const body = req.body || {};
-    const patch = { thinkingLevel: body.thinkingLevel || null, readOnly: body.readOnly !== undefined ? Boolean(body.readOnly) : task.readOnly };
-    if (body.description !== undefined) patch.description = String(body.description || '').trim();
-    if (body.workingDir !== undefined) {
-      patch.workingDir = resolveWorkingDir(body.workingDir);
-      if (!patch.workingDir) return res.status(400).json({ error: '工作目录路径不能为空或不合法' });
-    }
-    if (!task.workingDir && !patch.workingDir) return res.status(400).json({ error: '请选择工作目录' });
-    if (body.model !== undefined) {
-      if (!body.model) { patch.model = null; patch.modelProvider = null; }
-      else {
-        const selected = modelsCache.models.find((m) => m.label === body.model);
-        if (!selected) return res.status(400).json({ error: '模型不存在或模型列表尚未刷新' });
-        patch.model = selected.id; patch.modelProvider = selected.provider;
-      }
-    }
-    updateTask(task.id, patch);
-    const updated = getTask(task.id);
-    await startRun(updated, updated.description, body.sessionId || activeSessionIds.get(task.id));
-    res.json({ task: publicTask(getTask(task.id)) });
-  } catch (error) {
-    res.status(500).json({ error: error.message || String(error) });
-  }
-});
-app.post('/api/tasks/:id/reply', async (req, res) => {
-  try {
-    const task = getTask(req.params.id);
-    if (!task) return res.status(404).json({ error: '任务不存在' });
-    if (task.status !== 'review') return res.status(409).json({ error: '只有待确认状态可以回复' });
-    const message = String(req.body?.message || '').trim();
-    if (!message) return res.status(400).json({ error: '回复内容不能为空' });
-    if (concurrencyFull(1)) return res.status(409).json({ error: `已达到并发上限：${config.maxConcurrent}` });
-    await startRun(task, message, req.body?.sessionId || activeSessionIds.get(task.id));
-    res.json({ task: publicTask(getTask(task.id)) });
-  } catch (error) {
-    res.status(500).json({ error: error.message || String(error) });
-  }
-});
-async function executeWebCommand(task, input) {
-  if (!isWebPiRunning(task.id)) throw new Error('当前任务没有活动的 Web SDK 会话，请先执行一次任务');
-  const match = String(input || '').trim().match(/^\/([^\s]+)(?:\s+(.*))?$/s);
-  if (!match) throw new Error('请输入以 / 开头的 pi 指令');
-  const name = match[1].toLowerCase();
-  const argument = (match[2] || '').trim();
-  if (name === 'model') {
-    if (!argument || argument === 'next') await sendWebCommand(task.id, argument === 'next' ? { type: 'cycle_model' } : { type: 'get_available_models' });
-    else {
-      const selected = modelsCache.models.find((m) => m.label === argument || `${m.provider}/${m.id}` === argument || m.id === argument);
-      if (!selected) throw new Error(`找不到模型：${argument}`);
-      await sendWebCommand(task.id, { type: 'set_model', provider: selected.provider, modelId: selected.id });
-    }
-  } else if (name === 'thinking' || name === 'thinking-level') {
-    if (!argument) await sendWebCommand(task.id, { type: 'get_thinking_levels' });
-    else {
-      if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(argument)) throw new Error('thinking level 不合法');
-      await sendWebCommand(task.id, { type: 'set_thinking_level', level: argument });
-    }
-  } else if (name === 'compact') await sendWebCommand(task.id, { type: 'compact', ...(argument ? { customInstructions: argument } : {}) });
-  else if (name === 'abort') await sendWebCommand(task.id, { type: 'abort' });
-  else if (name === 'session' || name === 'models') await sendWebCommand(task.id, { type: name === 'session' ? 'get_state' : 'get_available_models' });
-  else throw new Error(`暂不支持 /${name}，支持：/model、/thinking、/compact、/abort、/session、/models`);
-}
-
-app.post('/api/tasks/:id/command', async (req, res) => {
+app.post('/api/tasks/:id/tui/restart', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  try { await executeWebCommand(task, req.body?.command); res.json({ ok: true, state: getWebState(task.id) }); }
-  catch (error) { res.status(409).json({ error: error.message }); }
+  const stopped = await stopWebTuiForRestart(task.id);
+  res.json({ stopped });
 });
-app.post('/api/tasks/:id/terminate', (req, res) => {
+app.post('/api/tasks/:id/terminate', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (task.status !== 'running') return res.status(409).json({ error: '任务不在执行中' });
-  const stopped = stopWebPi(task.id);
+  const stopped = await stopTaskTui(task.id, { silent: true });
   const killed = killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
   res.json({ task: publicTask(updateTask(task.id, { status: 'review', lastRun: { status: 'terminated', reason: '已手动终止执行', at: nowIso(), stopped, killed } })) });
 });
 
-// session 日志
-app.get('/api/tasks/:id/session', (req, res) => {
-  const task = getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
-  const childSession = resolveTaskSession(task, req.query.sessionId);
-  const parsed = parseSessionFile(childSession?.sessionFile || task.sessionFile);
-  const items = [];
-  for (const entry of parsed.entries) {
-    if (entry.type === 'model_change' && entry.provider) {
-      items.push({ kind: 'note', text: `切换模型：${entry.provider}/${entry.modelId || ''}`, ts: entry.timestamp });
-      continue;
-    }
-    if (entry.type !== 'message' || !entry.message) continue;
-    const message = entry.message;
-    if (message.role === 'user') items.push({ kind: 'user', text: extractText(message.content), ts: message.timestamp });
-    else if (message.role === 'assistant') items.push({
-      kind: 'assistant', text: extractText(message.content),
-      toolCalls: Array.isArray(message.content) ? message.content.filter((b) => b.type === 'toolCall').map((b) => ({ name: b.name, args: b.arguments })) : [],
-      stopReason: message.stopReason || null, errorMessage: message.errorMessage || null,
-      model: message.provider ? `${message.provider}/${message.model || ''}` : '', usage: message.usage || null, ts: message.timestamp,
-    });
-    else if (message.role === 'toolResult') items.push({ kind: 'toolResult', toolName: message.toolName || '', isError: Boolean(message.isError), text: extractText(message.content).slice(0, 6000), ts: entry.timestamp });
-  }
-  res.json({ exists: parsed.exists, items, stats: parsed.stats, header: parsed.header ? { id: parsed.header.id, cwd: parsed.header.cwd, createdAt: parsed.header.timestamp } : null });
-});
-
-// Web 会话实时事件流（pi --mode json stdout）
-app.get('/api/tasks/:id/events', (req, res) => {
-  const task = getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
-  res.json({ running: isWebPiRunning(task.id), events: getWebEvents(task.id) });
-});
-app.get('/api/tasks/:id/events/stream', (req, res) => {
-  const task = getTask(req.params.id);
-  if (!task) return res.status(404).end();
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders?.();
-  res.write(': connected\n\n');
-  const send = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
-  for (const event of getWebEvents(task.id)) send(event);
-  const unsubscribe = subscribeWebPi(task.id, send);
-  const heartbeat = setInterval(() => res.write(': ping\n\n'), 15000);
-  req.on('close', () => { clearInterval(heartbeat); unsubscribe(); });
-});
-
-// WebSocket 会话窗口：协议采用参考 pi-web-ui 的 snapshot + event 模式。
 const webSockets = new WebSocketServer({ noServer: true });
 webSockets.on('connection', (ws) => {
+  const clientId = randomUUID();
   let taskId = null;
   let unsubscribe = null;
   const send = (message) => {
     if (ws.readyState === 1) ws.send(JSON.stringify(message));
   };
-  const bind = async (id, sessionId) => {
+  const bindTui = async (id, sessionId, cols, rows, theme) => {
     const task = getTask(id);
-    if (!task) return send({ type: 'error', error: '任务不存在' });
-    if (!task.workingDir) return send({ type: 'snapshot', state: null, taskId: id, childSessionId: sessionId || 'main' });
+    if (!task) return send({ type: 'tui_error', error: '任务不存在' });
+    if (task.status === 'done' || task.status === 'archived') return send({ type: 'tui_error', error: '当前任务状态不能打开原生 TUI' });
+    if (task.status !== 'running' && concurrencyFull(1)) return send({ type: 'tui_error', error: `已达到并发上限：${config.maxConcurrent}` });
     const childSession = resolveTaskSession(task, sessionId);
-    if (!childSession) return send({ type: 'error', error: '子会话不存在' });
-    taskId = id;
-    activeSessionIds.set(id, childSession.id);
-    const currentState = getWebState(id);
-    if (!currentState || currentState.childSessionId !== childSession.id) {
-      try { await openTaskSession(task, childSession); }
-      catch (error) { return send({ type: 'error', error: `打开 SDK 会话失败：${error.message}` }); }
+    if (!childSession) return send({ type: 'tui_error', error: '子会话不存在' });
+    try {
+      await withTuiLock(id, () => openTaskTui(getTask(id), childSession, cols, rows, theme));
+      if (taskId && taskId !== id) releaseWebTuiInput(taskId, clientId);
+      taskId = id;
+      unsubscribe?.();
+      unsubscribe = subscribeWebTui(id, send);
+      claimWebTuiInput(id, clientId);
+      resizeWebTui(id, cols, rows);
+      send({ type: 'tui_ready', taskId: id, childSessionId: childSession.id });
+    } catch (error) {
+      const detail = error?.message || String(error);
+      console.error(`[workbench] 打开原生 TUI 失败（${id}/${sessionId || 'main'}）：${detail}`);
+      send({ type: 'tui_error', error: `打开原生 TUI 失败：${detail}` });
     }
-    unsubscribe?.();
-    unsubscribe = subscribeWebPi(id, (event) => {
-      // Initial history is not replayed here; the full current state is sent
-      // once, then every SDK event is followed by a fresh snapshot.
-      if (event.type !== 'snapshot') send(event);
-      if (event.type === 'snapshot') send(event);
-    });
-    send({ type: 'snapshot', state: getWebState(id), taskId: id, childSessionId: childSession.id });
   };
   ws.on('message', async (raw) => {
     try {
       const message = JSON.parse(String(raw));
-      if (message.type === 'hello' || message.type === 'select_task') {
-        await bind(message.taskId, message.sessionId);
-        return;
-      }
-      if (!taskId) return send({ type: 'error', error: '请先选择任务会话' });
-      const task = getTask(taskId);
-      if (!task) return send({ type: 'error', error: '任务不存在' });
-      if (message.type === 'prompt') {
-        const text = String(message.text || '').trim();
-        if (!text) return;
-        if (text.startsWith('/')) await executeWebCommand(task, text);
-        else if (!['todo', 'running', 'review'].includes(task.status)) throw new Error('当前任务状态不能继续对话');
-        else {
-          if (task.status !== 'running' && concurrencyFull(1)) throw new Error(`已达到并发上限：${config.maxConcurrent}`);
-          nameSessionFromPrompt(task, activeSessionIds.get(task.id), text);
-          updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
-          void sendWebPrompt(task.id, text, message.queue ? 'followUp' : 'steer').catch((error) => send({ type: 'error', error: error.message }));
-        }
-        send({ type: 'snapshot', state: getWebState(taskId), taskId });
-      } else if (message.type === 'command') {
-        await executeWebCommand(task, message.command);
-        send({ type: 'snapshot', state: getWebState(taskId), taskId });
-      } else if (message.type === 'select_model') {
-        await sendWebCommand(taskId, { type: 'set_model', provider: message.provider, modelId: message.modelId });
-        send({ type: 'snapshot', state: getWebState(taskId), taskId });
-      } else if (message.type === 'abort') {
-        await sendWebCommand(taskId, { type: 'abort' });
+      if (message.type === 'tui_hello') return await bindTui(message.taskId, message.sessionId, message.cols, message.rows, message.theme);
+      // xterm can emit a final input or resize frame while an old PTY is
+      // exiting. It is harmless and should not produce a user-facing toast.
+      if (message.type === 'tui_input' || message.type === 'tui_resize') {
+        if (!taskId || !isWebTuiRunning(taskId)) return;
+        if (message.type === 'tui_input') return writeWebTui(taskId, clientId, message.data);
+        return resizeWebTui(taskId, message.cols, message.rows);
       }
     } catch (error) {
-      send({ type: 'error', error: error.message || String(error) });
+      const detail = error?.message || String(error);
+      console.error(`[workbench] 原生 TUI WebSocket 错误：${detail}`);
+      send({ type: 'tui_error', error: detail });
     }
   });
-  ws.on('close', () => unsubscribe?.());
+  ws.on('close', () => {
+    unsubscribe?.();
+    if (taskId) releaseWebTuiInput(taskId, clientId);
+  });
 });
 
-// 元数据
 function selectWindowsDirectory(res) {
-  // FolderBrowserDialog is available on both Windows 10 and 11. Use UTF-8
-  // explicitly so paths containing Chinese characters survive PowerShell's
-  // console encoding, and fall back to pwsh when powershell.exe is absent.
   const script = [
-    '$ErrorActionPreference = "Stop"',
-    '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
-    'Add-Type -AssemblyName System.Windows.Forms',
-    '[System.Windows.Forms.Application]::EnableVisualStyles()',
-    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
-    '$dialog.Description = "选择工作目录"',
-    '$dialog.ShowNewFolderButton = $true',
-    '$result = $dialog.ShowDialog()',
+    '$ErrorActionPreference = "Stop"', '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
+    'Add-Type -AssemblyName System.Windows.Forms', '[System.Windows.Forms.Application]::EnableVisualStyles()',
+    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog', '$dialog.Description = "选择工作目录"',
+    '$dialog.ShowNewFolderButton = $true', '$result = $dialog.ShowDialog()',
     'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($dialog.SelectedPath) }',
   ].join('; ');
   const args = ['-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script];
   const commands = ['powershell.exe', 'pwsh.exe'];
   let index = 0;
-  const run = () => execFile(commands[index], args, {
-    timeout: 120000, encoding: 'utf8', windowsHide: true, maxBuffer: 1024 * 1024,
-  }, (error, stdout) => {
-    if (error?.code === 'ENOENT' && index < commands.length - 1) {
-      index += 1;
-      return run();
-    }
+  const run = () => execFile(commands[index], args, { timeout: 120000, encoding: 'utf8', windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+    if (error?.code === 'ENOENT' && index < commands.length - 1) { index += 1; return run(); }
     if (error) return res.status(500).json({ error: `打开 Windows 目录选择器失败：${error.message}` });
     const selected = String(stdout || '').replace(/^\uFEFF/, '').trim();
     if (!selected) return res.json({ cancelled: true });
@@ -597,27 +380,15 @@ function selectWindowsDirectory(res) {
   });
   run();
 }
-
 app.post('/api/select-directory', (_req, res) => {
   const platform = process.platform;
-  let command;
-  let args;
-  if (platform === 'darwin') {
-    command = 'osascript';
-    args = ['-e', 'POSIX path of (choose folder with prompt "选择工作目录")'];
-  } else if (platform === 'linux') {
-    command = 'zenity';
-    args = ['--file-selection', '--directory', '--title=选择工作目录'];
-  } else if (platform === 'win32') {
-    return selectWindowsDirectory(res);
-  } else {
-    return res.status(501).json({ error: '当前系统暂不支持原生目录选择，请直接输入路径' });
-  }
+  if (platform === 'win32') return selectWindowsDirectory(res);
+  const command = platform === 'darwin' ? 'osascript' : platform === 'linux' ? 'zenity' : null;
+  const args = platform === 'darwin' ? ['-e', 'POSIX path of (choose folder with prompt "选择工作目录")'] : platform === 'linux' ? ['--file-selection', '--directory', '--title=选择工作目录'] : [];
+  if (!command) return res.status(501).json({ error: '当前系统暂不支持原生目录选择，请直接输入路径' });
   execFile(command, args, { timeout: 120000, encoding: 'utf8' }, (error, stdout) => {
     if (error) {
-      // Native pickers use a non-zero exit code when the user presses Cancel.
-      if (platform === 'darwin' && error.code === 1) return res.json({ cancelled: true });
-      if (platform === 'linux' && error.code === 1) return res.json({ cancelled: true });
+      if (error.code === 1) return res.json({ cancelled: true });
       return res.status(500).json({ error: `打开目录选择器失败：${error.message}` });
     }
     const selected = String(stdout || '').trim();
@@ -630,55 +401,27 @@ app.get('/api/dirs', (_req, res) => {
   try { dirs = readdirSync(PROJECTS_ROOT).filter((name) => { try { return statSync(path.join(PROJECTS_ROOT, name)).isDirectory(); } catch { return false; } }).sort(); } catch { /* ignore */ }
   res.json({ root: PROJECTS_ROOT, dirs });
 });
-app.get('/api/models', (_req, res) => res.json(modelsCache));
-app.post('/api/models/refresh', async (_req, res) => res.json(await refreshModels()));
-app.get('/api/config', (_req, res) => res.json({ ...config, projectsRoot: PROJECTS_ROOT, sessionsDir: SESSIONS_DIR, piBin: resolvePiBin() }));
+app.get('/api/config', (_req, res) => res.json({ ...config, projectsRoot: PROJECTS_ROOT, sessionsDir: SESSIONS_DIR }));
 app.post('/api/config', (req, res) => {
-  for (const key of ['maxConcurrent', 'terminalApp', 'approvePi']) if (key in (req.body || {})) config[key] = req.body[key];
+  for (const key of ['maxConcurrent', 'approvePi']) if (key in (req.body || {})) config[key] = req.body[key];
   saveConfig();
   res.json(config);
 });
 
-// Terminal 脚本退出回调：等待 session 最后一行写完后再判断，避免正常完成被误判为中断
-app.post('/api/internal/turn-ended', (req, res) => {
-  if ((req.headers.authorization || '') !== `Bearer ${authToken}`) return res.status(401).json({ error: 'unauthorized' });
-  const taskId = req.body?.taskId;
-  const exitCode = req.body?.exitCode;
-  setTimeout(() => {
-    const task = getTask(taskId);
-    if (!task || task.status !== 'running') return;
-    const verdict = evaluateRunningTask(task, { findPiPids });
-    if (verdict) {
-      updateTask(task.id, { status: verdict.state, lastRun: verdict.lastRun });
-    } else if (exitCode !== 0) {
-      updateTask(task.id, { status: 'review', lastRun: { status: 'failed', reason: `pi 异常退出（exit code ${exitCode}）`, at: nowIso() } });
-    }
-    // exitCode 为 0 但 session 尚未出现完整消息时，不立即判定中断；后台轮询会继续等待。
-  }, 1200);
-  res.json({ ok: true });
-});
-
-// 自动清理已废弃超过 15 天的任务
-setInterval(purgeArchivedTasks, 60 * 60 * 1000);
-
-// 轮询 session 状态
+setInterval(() => { void purgeArchivedTasks(); }, 60 * 60 * 1000);
 setInterval(() => {
   for (const task of listTasks()) {
     if (task.status !== 'running') continue;
-    if (isWebPiRunning(task.id)) continue;
+    persistSessionTitle(task, resolveTaskSession(task));
+    if (isWebTuiRunning(task.id)) continue;
     const verdict = evaluateRunningTask(task, { findPiPids });
     if (verdict) updateTask(task.id, { status: verdict.state, lastRun: verdict.lastRun });
   }
 }, 2000);
 
 loadTasks();
-purgeArchivedTasks();
-refreshModels().catch(() => {});
-const server = app.listen(config.port, '127.0.0.1', () => {
-  console.log(`[workbench] http://127.0.0.1:${config.port}`);
-  console.log(`[workbench] pi: ${resolvePiBin()}`);
-  console.log(`[workbench] projects: ${PROJECTS_ROOT}`);
-});
+void purgeArchivedTasks();
+const server = app.listen(config.port, '127.0.0.1', () => console.log(`[workbench] http://127.0.0.1:${config.port}`));
 server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
   if (url.pathname !== '/ws') { socket.destroy(); return; }
@@ -690,3 +433,19 @@ server.on('error', (error) => {
     process.exit(1);
   }
 });
+
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // A PTY cannot survive this owner process reliably on Windows. Stop every
+  // tracked TUI before exiting instead of leaving orphaned pi processes.
+  for (const client of webSockets.clients) {
+    try { client.close(); } catch { /* already closed */ }
+  }
+  await stopAllWebTuis();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);

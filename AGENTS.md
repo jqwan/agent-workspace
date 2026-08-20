@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-这是一个本地单用户 π 工作台：Express 提供 REST API，WebSocket 提供实时会话事件，pi agent 通过 `@earendil-works/pi-coding-agent` SDK 在进程内运行。
+这是一个本地单用户 π 工作台：Express 提供 REST API，WebSocket 转发浏览器 xterm 与 pi 原生 TUI 的 PTY 数据。
 
 ## 开发约定
 
@@ -11,7 +11,7 @@
 - 前端位于 `public/`，当前使用原生 JavaScript、HTML 和 CSS，不要无必要地引入构建工具。
 - 公共格式化逻辑放在 `public/ui/format.js`。
 - 任务持久化通过 `lib/store.js` 完成；不要直接修改 `data/tasks.json` 来实现业务逻辑。
-- Web 会话逻辑集中在 `lib/web-executor.js`；不要改回通过 `pi --mode rpc` 或 `pi --mode json` 驱动会话。
+- 原生 TUI 会话逻辑集中在 `lib/tui-executor.js`；保持 PTY、浏览器终端和 session JSONL 的单写入者约束。
 - 修改前端静态资源后，更新 `public/index.html` 中对应的 `style.css?v=...` 或 `app.js?v=...` 版本号，避免浏览器缓存旧资源。
 - 用户可见文字以中文为主；保持已有的中文界面风格。
 
@@ -42,7 +42,7 @@
 - `server.js`：HTTP/WebSocket 路由和任务生命周期
 - `lib/store.js`：任务存储
 - `lib/session.js`：session 解析
-- `lib/web-executor.js`：SDK 会话和实时事件
+- `lib/tui-executor.js`：pi 原生 TUI PTY、输入、尺寸和实时输出
 - `public/app.js`：前端交互
 - `public/style.css`：页面样式和主题
 - `public/index.html`：资源入口及缓存版本

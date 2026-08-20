@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>工作台</title>
-  <link rel="stylesheet" href="style.css?v=session-ui-47">
+  <link rel="stylesheet" href="style.css?v=tui-only-3">
+  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
   <header class="topbar">
@@ -15,38 +16,23 @@
     <aside id="app-sidebar" class="app-sidebar">
       <div class="sidebar-nav" role="tablist" aria-label="模块切换">
         <button id="module-tasks" class="sidebar-nav-item active" role="tab"><span>▣</span><span>任务管理</span></button>
-        <button id="module-session" class="sidebar-nav-item" role="tab"><span>◌</span><span>会话管理</span></button>
+        <button id="module-session" class="sidebar-nav-item" role="tab"><span>◌</span><span>原生 TUI</span></button>
       </div>
-      <div id="task-sidebar" class="sidebar-panel">
-        <button id="sidebar-new-task" class="sidebar-action">＋ 新建任务</button>
-        <div id="task-groups" class="task-groups"></div>
-      </div>
-      <div id="session-sidebar" class="sidebar-panel hidden">
-        <div id="session-tree"></div>
-      </div>
+      <div id="task-sidebar" class="sidebar-panel"><button id="sidebar-new-task" class="sidebar-action">＋ 新建任务</button><div id="task-groups" class="task-groups"></div></div>
+      <div id="session-sidebar" class="sidebar-panel hidden"><div id="session-tree"></div></div>
     </aside>
     <main id="workspace-main">
-  <section class="toolbar" id="task-toolbar">
-    <select id="sort"><option value="updated">最近更新</option><option value="created">创建时间（新→旧）</option><option value="deadline">Deadline（近→远）</option></select>
-    <input id="search" type="search" placeholder="搜索标题或内容">
-  </section>
-  <section id="task-list" class="module-view"></section>
-  <section id="session-view" class="module-view hidden">
-    <div class="session-layout">
-      <div class="session-main">
-        <header class="session-header">
-          <div class="session-context"><span class="session-context-icon">✦</span><div><div class="session-eyebrow">当前会话</div><strong id="session-title">选择一个子会话</strong></div></div>
-          <div class="session-controls"><select id="session-task-select" class="session-task-fallback"><option value="">选择一个任务会话</option></select><button id="session-model-button" disabled>🤖 选择模型</button><button id="session-thinking-button" disabled>思考：—</button><div id="session-model-menu" class="session-model-menu hidden"></div></div>
-        </header>
-        <div id="session-live" class="session-live hidden"></div><div id="session-messages" class="session-messages"><div class="empty">从左侧选择一个任务会话</div></div>
-        <div class="session-composer" style="position:relative"><div id="session-command-menu" class="session-command-menu hidden"></div><textarea id="session-input" rows="1" placeholder="在 Web 会话中回复 pi…（Enter 发送，Shift+Enter 换行）"></textarea><div class="session-actions"><button id="session-send" class="primary">发送消息</button><button id="session-followup" title="等待当前回复完成后再发送">排队发送</button><button id="session-stop">终止执行</button></div><footer class="session-footer"><span id="session-context-usage" class="session-context-usage">上下文 —</span><span id="session-token-usage">Token —</span><span id="session-cache-usage">缓存 —</span><span id="session-message-usage">消息 —</span><span id="session-cost-usage">成本 —</span></footer></div>
-      </div>
-    </div>
-  </section>
+      <section class="toolbar" id="task-toolbar"><select id="sort"><option value="updated">最近更新</option><option value="created">创建时间（新→旧）</option><option value="deadline">Deadline（近→远）</option></select><input id="search" type="search" placeholder="搜索标题或内容"></section>
+      <section id="task-list" class="module-view"></section>
+      <section id="session-view" class="module-view hidden">
+        <div class="session-layout"><div class="session-main">
+          <header class="session-header"><div class="session-context"><span class="session-context-icon">π</span><div><div class="session-eyebrow">当前原生 TUI 会话</div><strong id="session-title">选择一个子会话</strong></div></div><div class="session-controls"><select id="session-task-select"><option value="">选择一个任务会话</option></select><button id="session-restart" title="重新连接当前原生终端">重新连接</button></div></header>
+          <div id="session-terminal" class="session-terminal" aria-label="pi 原生终端"><div class="terminal-empty">从左侧选择一个会话以打开 pi 原生 TUI</div></div>
+        </div></div>
+      </section>
     </main>
   </div>
-  <div id="modal-root"></div>
-  <div id="toast-root"></div>
-  <script type="module" src="app.js?v=session-ui-36"></script>
+  <div id="modal-root"></div><div id="toast-root"></div>
+  <script type="module" src="app.js?v=tui-only-5"></script>
 </body>
 </html>
