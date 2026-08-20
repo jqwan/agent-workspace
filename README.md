@@ -38,7 +38,6 @@ npm start
 - `lib/store.js`：任务持久化
 - `lib/session.js`：session JSONL 解析和统计
 - `public/`：原生 JavaScript、HTML、CSS 与 xterm 页面
-- `docs/windows.md`：Windows 安装与使用说明
 
 ## 配置
 
@@ -56,7 +55,21 @@ npm start
 
 ## Windows
 
-详见 [Windows 使用说明](docs/windows.md)。原生 TUI 使用 `node-pty`/ConPTY，并直接运行本项目安装的 pi CLI，避免 npm `pi.cmd` 的 PTY 引号问题。
+Windows 需要 Node.js 18 或更高版本（推荐 LTS）、pi 以及可用的模型凭据：
+
+```powershell
+node --version
+pi --version
+npm install
+npm start
+```
+
+- 原生 TUI 使用 `node-pty`/ConPTY，直接运行本项目安装的 pi CLI，避免 npm `pi.cmd` 的 PTY 引号问题。
+- 若 `node-pty` 没有可用的预编译二进制，需要安装 Visual Studio C++ Build Tools 以供 node-gyp 编译。
+- pi 执行 bash 工具通常需要 Git for Windows 提供的 `bash.exe`。
+- 滚轮会转换为 pi 的 SGR 鼠标事件，`PageUp`/`PageDown` 保持 pi 原有行为；输入法候选框依赖 xterm 的可见硬件光标。
+- 建议使用最新版 Edge、Chrome 或 Firefox。主题切换会重启当前 TUI，应避免在模型生成的关键时刻切换。
+- 目录选择器使用 PowerShell 原生文件夹对话框；推荐使用绝对路径，例如 `C:\Users\name\project`。
 
 ## 开发检查
 
