@@ -71,11 +71,11 @@ function persistSessionTitle(task, child) {
 function taskStats(task) {
   const stats = { sessions: 0, messages: 0, userMessages: 0, assistantMessages: 0, toolResults: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0, errors: 0 };
   const children = taskSessions(task);
-  const started = Boolean(task.lastRun) || children.some((child) => Boolean(parseSessionFile(child.sessionFile).stats?.messages));
   for (const child of children) {
-    if (!started && child.id === 'main') continue;
-    stats.sessions++;
     const current = parseSessionFile(child.sessionFile).stats;
+    // 与 publicTask 显示规则一致：没有消息内容的「主会话」占位不计入
+    if (child.id === 'main' && !current?.messages) continue;
+    stats.sessions++;
     if (!current) continue;
     stats.messages += current.messages || 0;
     stats.userMessages += current.user || 0;
@@ -95,8 +95,8 @@ function publicTask(task) {
   const internalStatus = task.status;
   const displayStatus = internalStatus === 'todo' ? 'todo' : internalStatus === 'done' ? 'done' : internalStatus === 'archived' ? 'archived' : 'running';
   const allSessions = taskSessions(task);
-  const started = Boolean(task.lastRun) || allSessions.some((child) => Boolean(parseSessionFile(child.sessionFile).stats?.messages));
-  const visibleSessions = allSessions.filter((child) => started || child.id !== 'main');
+  // 「主会话」只存在于历史数据（由旧 task.sessionFile 回填）；没有消息内容时不显示
+  const visibleSessions = allSessions.filter((child) => child.id !== 'main' || Boolean(parseSessionFile(child.sessionFile).stats?.messages));
   return {
     ...task,
     status: displayStatus,
@@ -262,7 +262,10 @@ app.post('/api/tasks/:id/sessions', (req, res) => {
   const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);
-  updateTask(task.id, { sessions });
+  const patch = { sessions };
+  // 任务级 sessionFile（兼容字段）锚定到首个真实会话
+  if (!task.sessionFile) patch.sessionFile = session.sessionFile;
+  updateTask(task.id, patch);
   res.json({ session, task: publicTask(getTask(task.id)) });
 });
 app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {

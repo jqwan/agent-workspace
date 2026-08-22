@@ -22,7 +22,8 @@
 - 删除任务是软删除：设置 `archived`、`archivedAt` 和 `purgeAt`，15 天后才清理 session 文件和任务记录。
 - 已废弃任务不应出现在全部任务看板中；恢复后回到待办状态。
 - 任务分类字段是 `color`，有效值为 `red`、`orange`、`yellow`、`green`、`cyan`、`blue`、`purple`、`gray`。不要重新引入 priority/重要程度概念。
-- 自动创建的主会话在任务实际启动前不显示；显式创建的子会话可以显示。
+- 新建任务不预建任何会话（`sessions` 为空数组、`sessionFile` 为 null）；点击执行时才创建首个会话（标题「新会话」，随后按首条消息重命名），并把任务级 `sessionFile` 锚定到该会话。
+- 「主会话」只存在于历史数据（由旧 `task.sessionFile` 回填）；没有消息内容的主会话不显示。
 - 工作目录可为绝对路径、`~` 路径或兼容旧数据的 `projects/` 相对路径。使用 `resolveWorkingDir()`，不要重新限制为固定项目子目录；Windows 路径如 `C:\\Users\\name\\project` 必须保持可用。
 - Windows 目录选择器通过 PowerShell，macOS 使用 AppleScript，Linux 使用 `zenity`；修改目录选择逻辑时要保留三平台分支。
 - 主题有系统、浅色、深色三种模式，用户选择保存在 `localStorage`；新增主题样式时必须同时检查系统主题和手动主题覆盖规则。

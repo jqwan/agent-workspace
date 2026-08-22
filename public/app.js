@@ -279,7 +279,10 @@ async function restartTuiForTheme() {
 function selectSession(taskId, sessionId = 'main') {
   detachTui();
   state.sessionTask = taskId || null;
-  state.sessionSessionId = sessionId || 'main';
+  // 新建任务没有「主会话」；传入的 id 不存在时回退到服务端活跃会话或首个会话
+  const task = currentTask(taskId);
+  const target = task?.sessions?.find((session) => session.id === sessionId);
+  state.sessionSessionId = target?.id || task?.activeSessionId || task?.sessions?.[0]?.id || 'main';
   renderSessionTree();
   if (taskId) void openNativeTui();
 }
