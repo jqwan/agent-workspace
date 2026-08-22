@@ -237,7 +237,7 @@ app.delete('/api/tasks/:id/permanent', async (req, res) => {
 app.post('/api/tasks/:id/complete', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (!['todo', 'review'].includes(task.status)) return res.status(409).json({ error: '当前状态不能标记完成' });
+  if (!['todo', 'running', 'review'].includes(task.status)) return res.status(409).json({ error: '当前状态不能标记完成' });
   await stopTaskTui(task.id, { silent: true });
   killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
   res.json({ task: publicTask(updateTask(task.id, { status: 'done', completedAt: nowIso() })) });

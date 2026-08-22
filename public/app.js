@@ -4,7 +4,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS = { todo: { label: '待办', cls: 'todo' }, running: { label: '处理中', cls: 'running' }, done: { label: '已完成', cls: 'done' }, archived: { label: '已废弃', cls: 'archived' } };
 const COLORS = { red: { label: '红色' }, orange: { label: '橙色' }, yellow: { label: '黄色' }, green: { label: '绿色' }, cyan: { label: '青色' }, blue: { label: '蓝色' }, purple: { label: '紫色' }, gray: { label: '灰色' } };
 const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
-const state = { tasks: [], status: '', sort: 'updated', search: '', signature: '', sessionTask: null, sessionSessionId: 'main', collapsedSessionTasks: new Set() };
+const state = { tasks: [], status: '', sort: 'updated', search: '', signature: '', sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false, collapsedSessionTasks: new Set() };
 let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
@@ -38,6 +38,14 @@ function syncViewportHeight() {
 }
 applyTheme(['system', 'light', 'dark'].includes(localStorage.getItem('workbench-theme')) ? localStorage.getItem('workbench-theme') : 'system');
 syncViewportHeight();
+function applySidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  const button = $('#sidebar-toggle');
+  button.innerHTML = `<span>${collapsed ? '›' : '‹'}</span><span>${collapsed ? '展开侧边栏' : '收起侧边栏'}</span>`;
+  button.title = collapsed ? '展开侧边栏' : '收起侧边栏';
+  button.setAttribute('aria-label', button.title);
+}
+applySidebarCollapsed(localStorage.getItem('workbench-sidebar-collapsed') === 'true');
 window.addEventListener('resize', syncViewportHeight);
 window.visualViewport?.addEventListener('resize', syncViewportHeight);
 
@@ -85,9 +93,9 @@ function visibleTasks() {
 }
 function actions(task) {
   if (task.status === 'archived') return `<button data-action="restore" data-id="${task.id}">恢复任务</button><button class="danger" data-action="purge" data-id="${task.id}">永久删除</button>`;
-  if (task.status === 'todo') return `<button class="primary" data-action="execute" data-id="${task.id}">打开 TUI</button><button data-action="complete" data-id="${task.id}">标记完成</button><button data-action="edit" data-id="${task.id}">编辑</button><button class="danger" data-action="delete" data-id="${task.id}">删除</button>`;
-  if (task.status === 'running') return `<button class="primary" data-action="session" data-id="${task.id}">打开 TUI</button>${task.piRunning ? `<button data-action="terminate" data-id="${task.id}">■ 终止</button>` : `<button data-action="complete" data-id="${task.id}">标记完成</button>`}<button class="danger" data-action="delete" data-id="${task.id}">删除</button>`;
-  return `<button data-action="session" data-id="${task.id}">详情</button><button data-action="reopen" data-id="${task.id}">重开</button><button class="danger" data-action="delete" data-id="${task.id}">删除</button>`;
+  if (task.status === 'todo') return `<button class="primary" data-action="execute" data-id="${task.id}">打开会话</button><button data-action="complete" data-id="${task.id}">标记完成</button><button data-action="edit" data-id="${task.id}">编辑</button><button class="danger" data-action="delete" data-id="${task.id}">删除</button>`;
+  if (task.status === 'running') return `<button class="primary" data-action="session" data-id="${task.id}">打开会话</button><button data-action="complete" data-id="${task.id}">标记完成</button><button class="danger" data-action="delete" data-id="${task.id}">删除</button>`;
+  return `<button data-action="reopen" data-id="${task.id}">重开</button><button class="danger" data-action="delete" data-id="${task.id}">删除</button>`;
 }
 function card(task, compact = false) {
   const stats = task.stats || {};
@@ -115,6 +123,8 @@ function renderSessionHeader() {
   $('#session-view').classList.toggle('no-session', !task);
   const child = task?.sessions?.find((session) => session.id === state.sessionSessionId);
   $('#session-title').textContent = child?.title || task?.title || '选择一个子会话';
+  $('#session-description-text').textContent = task?.description?.trim() || '暂无任务描述';
+  $('#session-description-panel').classList.toggle('hidden', !state.sessionDescriptionOpen || !task);
   $('#session-restart').disabled = !task;
   $('#session-task-select').innerHTML = '<option value="">选择一个任务会话</option>' + sessionTasks().map((item) => `<option value="${item.id}"${item.id === state.sessionTask ? ' selected' : ''}>${esc(item.title)}</option>`).join('');
 }
@@ -177,7 +187,7 @@ async function openNativeTui() {
   if (tuiOpening) return tuiOpening;
   const task = currentTask(state.sessionTask);
   if (!task) return toast('请先选择一个会话', 'error');
-  if (task.status === 'done' || task.status === 'archived') return toast('当前任务不能打开原生 TUI', 'error');
+  if (task.status === 'done' || task.status === 'archived') return toast('当前任务不能打开会话', 'error');
   const taskId = task.id;
   const sessionId = state.sessionSessionId;
   tuiOpening = (async () => {
@@ -188,6 +198,26 @@ async function openNativeTui() {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs')]);
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
       terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: 'Consolas, "Cascadia Mono", "SFMono-Regular", monospace', theme: terminalTheme() });
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (event.type !== 'keydown' || !event.ctrlKey) return true;
+        const key = event.key.toLowerCase();
+        if (key === 'c' && terminal.hasSelection()) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (navigator.clipboard) void navigator.clipboard.writeText(terminal.getSelection()).catch(() => toast('复制失败，请使用右键菜单', 'error')); 
+          else toast('复制失败，请使用右键菜单', 'error');
+          terminal.clearSelection();
+          return false;
+        }
+        if (key === 'v') {
+          event.preventDefault();
+          event.stopPropagation();
+          if (navigator.clipboard) void navigator.clipboard.readText().then((text) => { if (text) terminal?.paste(text); }).catch(() => toast('粘贴失败，请使用右键菜单', 'error'));
+          else toast('粘贴失败，请使用右键菜单', 'error');
+          return false;
+        }
+        return true;
+      });
       fitAddon = new FitAddon(); terminal.loadAddon(fitAddon); terminal.open(box); fitAddon.fit(); terminal.focus();
       terminalImeCursorHandler = () => requestAnimationFrame(positionTerminalImeInput);
       terminalCursorSubscription = terminal.onCursorMove(terminalImeCursorHandler);
@@ -217,13 +247,13 @@ async function openNativeTui() {
           else if (event.type === 'tui_error') {
             const error = event.error || '终端错误';
             // Ignore stale frames emitted while a PTY is already exiting.
-            if (error === '原生 TUI 未运行') return;
+            if (error === '会话未运行') return;
             terminal?.write(`\r\n[工作台] ${error}\r\n`);
             toast(error, 'error');
           }
         } catch { /* ignore malformed frames */ }
       };
-      socket.onerror = () => toast('原生 TUI 连接失败，请查看服务终端中的错误信息', 'error');
+      socket.onerror = () => toast('会话连接失败，请查看服务终端中的错误信息', 'error');
       socket.onclose = () => {
         if (tuiSocket === socket) tuiSocket = null;
         if (state.sessionTask === taskId && terminal) terminal.write('\r\n[工作台] 终端连接已断开，点击“重新连接”可恢复。\r\n');
@@ -238,7 +268,7 @@ async function openNativeTui() {
 async function restartTuiForTheme() {
   const taskId = state.sessionTask;
   if (!taskId || !tuiSocket) return;
-  toast('主题已切换，正在重启原生 TUI…');
+  toast('主题已切换，正在重启会话…');
   try {
     await api(`/tasks/${taskId}/tui/restart`, { method: 'POST' });
   } catch { /* the process may already have exited */ }
@@ -274,7 +304,7 @@ async function openExecute(task) {
   try {
     const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
     await refresh(); switchModule('session'); selectSession(task.id, result.session.id);
-    toast(task.description ? '已打开原生 TUI，请在 pi 输入框中发送任务描述。' : '已打开原生 TUI。');
+    toast(task.description ? '已打开会话，请在 pi 输入框中发送任务描述。' : '已打开会话。');
   } catch (error) { toast(error.message, 'error'); }
 }
 function openDeleteTaskModal(task) {
@@ -321,7 +351,6 @@ function switchModule(module) {
   $('#module-session').classList.toggle('active', session); $('#module-tasks').classList.toggle('active', !session);
   $('#task-sidebar').classList.toggle('hidden', session); $('#session-sidebar').classList.toggle('hidden', !session);
   $('#task-toolbar').classList.toggle('hidden', session); $('#task-list').classList.toggle('hidden', session); $('#session-view').classList.toggle('hidden', !session);
-  if (!session) detachTui();
   if (session) renderSessionTree();
 }
 
@@ -329,8 +358,24 @@ $('#theme-select').onchange = (event) => { applyTheme(event.target.value); void 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (localStorage.getItem('workbench-theme') === 'system') void restartTuiForTheme(); });
 $('#module-tasks').onclick = () => switchModule('tasks');
 $('#module-session').onclick = () => switchModule('session');
+$('#sidebar-toggle').onclick = () => {
+  const collapsed = !document.body.classList.contains('sidebar-collapsed');
+  applySidebarCollapsed(collapsed);
+  localStorage.setItem('workbench-sidebar-collapsed', String(collapsed));
+};
 $('#sidebar-new-task').onclick = () => openTaskForm();
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
+$('#session-title').onclick = () => {
+  if (!currentTask(state.sessionTask)) return;
+  state.sessionDescriptionOpen = !state.sessionDescriptionOpen;
+  renderSessionHeader();
+};
+document.addEventListener('click', (event) => {
+  if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
+    state.sessionDescriptionOpen = false;
+    renderSessionHeader();
+  }
+});
 $('#session-restart').onclick = () => { detachTui(); void openNativeTui(); };
 $('#session-tree').onclick = (event) => {
   const create = event.target.closest('[data-new-session-task]');
