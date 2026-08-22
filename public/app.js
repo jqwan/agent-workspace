@@ -292,7 +292,7 @@ function modal(html) {
 function closeModal() { $('#modal-root').innerHTML = ''; }
 function openTaskForm(task = null) {
   const recent = recentWorkingDirs().map((dir) => `<option value="${esc(dir)}">${esc(dir)}</option>`).join('');
-  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label>标题<input id="task-title" value="${esc(task?.title || '')}" placeholder="例如：整理项目测试结果"></label><label>工作目录路径（必填）<div class="path-picker-row"><input id="task-working-dir" value="${esc(task?.workingDir || '')}" placeholder="例如：C:\\Projects\\demo 或 ~/projects/demo"><select id="recent-task-dir"><option value="">选择已使用的文件夹</option>${recent}</select><button type="button" id="choose-task-dir">选择文件夹</button></div></label><label>内容描述（可留空）<textarea id="task-desc" rows="7" placeholder="在打开的 pi TUI 中可参考此描述…">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色标签<div id="color-picker" class="color-picker">${Object.entries(COLORS).map(([key, value]) => `<button type="button" class="color-option color-${key}${taskColor(task || {}) === key ? ' active' : ''}" data-color-value="${key}" aria-label="${value.label}"><span></span></button>`).join('')}</div><input type="hidden" id="task-color" value="${taskColor(task || {})}"></label><label>截止时间<input id="task-deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button class="primary" id="save-task">${task ? '保存' : '创建'}</button><button data-close>取消</button></div>`);
+  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label>标题<input id="task-title" value="${esc(task?.title || '')}"></label><label>工作目录路径<div class="path-picker-row"><input id="task-working-dir" value="${esc(task?.workingDir || '')}"><select id="recent-task-dir"><option value="">选择已使用的文件夹</option>${recent}</select><button type="button" id="choose-task-dir">选择文件夹</button></div></label><label>内容描述<textarea id="task-desc" rows="7">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色标签<div id="color-picker" class="color-picker">${Object.entries(COLORS).map(([key, value]) => `<button type="button" class="color-option color-${key}${taskColor(task || {}) === key ? ' active' : ''}" data-color-value="${key}" aria-label="${value.label}"><span></span></button>`).join('')}</div><input type="hidden" id="task-color" value="${taskColor(task || {})}"></label><label>截止时间<input id="task-deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button class="primary" id="save-task">${task ? '保存' : '创建'}</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   form.querySelectorAll('[data-color-value]').forEach((button) => { button.onclick = () => { $('#task-color', form).value = button.dataset.colorValue; form.querySelectorAll('[data-color-value]').forEach((item) => item.classList.toggle('active', item === button)); }; });
   $('#recent-task-dir', form).onchange = (event) => { if (event.target.value) { $('#task-working-dir', form).value = event.target.value; event.target.value = ''; } };
@@ -333,6 +333,16 @@ function openClearArchivedModal() {
       toast(error.message, 'error');
     }
   };
+}
+async function createChildSession(task) {
+  try {
+    const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
+    await refresh();
+    selectSession(task.id, result.session.id);
+    toast('子会话已创建');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 function openSessionModal(task, session = null) {
   const editing = Boolean(session);
@@ -379,7 +389,7 @@ document.addEventListener('click', (event) => {
 $('#session-restart').onclick = () => { detachTui(); void openNativeTui(); };
 $('#session-tree').onclick = (event) => {
   const create = event.target.closest('[data-new-session-task]');
-  if (create) { const task = currentTask(create.dataset.newSessionTask); if (task) openSessionModal(task); return; }
+  if (create) { const task = currentTask(create.dataset.newSessionTask); if (task) void createChildSession(task); return; }
   const remove = event.target.closest('[data-delete-session]');
   if (remove) { event.stopPropagation(); const task = currentTask(remove.dataset.deleteSession); if (task) openDeleteSessionModal(task, remove.dataset.sessionId); return; }
   const group = event.target.closest('[data-session-group]');
