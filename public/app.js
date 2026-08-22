@@ -41,9 +41,9 @@ syncViewportHeight();
 function applySidebarCollapsed(collapsed) {
   document.body.classList.toggle('sidebar-collapsed', collapsed);
   const button = $('#sidebar-toggle');
-  button.innerHTML = `<span>${collapsed ? '›' : '‹'}</span><span>${collapsed ? '展开侧边栏' : '收起侧边栏'}</span>`;
   button.title = collapsed ? '展开侧边栏' : '收起侧边栏';
   button.setAttribute('aria-label', button.title);
+  button.setAttribute('aria-expanded', String(!collapsed));
 }
 applySidebarCollapsed(localStorage.getItem('workbench-sidebar-collapsed') === 'true');
 window.addEventListener('resize', syncViewportHeight);
@@ -78,10 +78,11 @@ function renderStats() {
   state.tasks.forEach((task) => { if (counts[task.status] !== undefined) counts[task.status]++; if (task.overdue) overdue++; });
   $('#stats').innerHTML = ['todo', 'running', 'done'].map((key) => `<span class="chip ${STATUS[key].cls}">${STATUS[key].label} ${counts[key]}</span>`).join('') + (overdue ? `<span class="chip overdue">逾期 ${overdue}</span>` : '');
 }
+const GROUP_ICONS = { '': '▦', todo: '○', running: '◐', done: '✓', archived: '✕' };
 function renderTaskSidebar() {
   $('#task-groups').innerHTML = [{ key: '', label: '全部任务' }, ...Object.entries(STATUS).map(([key, value]) => ({ key, label: value.label }))].map(({ key, label }) => {
     const count = key ? state.tasks.filter((task) => task.status === key).length : state.tasks.filter((task) => task.status !== 'archived').length;
-    return `<button class="task-group-item${state.status === key ? ' active' : ''}" data-task-filter="${key}"><span>${esc(label)}</span><b>${count}</b></button>`;
+    return `<button class="task-group-item${state.status === key ? ' active' : ''}" data-task-filter="${key}"><span class="group-icon">${GROUP_ICONS[key] || '•'}</span><span class="group-label">${esc(label)}</span><b>${count}</b></button>`;
   }).join('');
 }
 function visibleTasks() {

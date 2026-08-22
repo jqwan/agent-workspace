@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>工作台</title>
-  <link rel="stylesheet" href="style.css?v=tui-only-11">
+  <link rel="stylesheet" href="style.css?v=tui-only-15">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="topbar-brand"><span class="brand-mark">π</span><strong>工作台</strong></div>
+    <button id="sidebar-toggle" class="topbar-brand" type="button" title="收起侧边栏" aria-label="收起侧边栏"><span class="brand-mark">π</span><strong>工作台</strong></button>
     <div class="topbar-tools"><select id="theme-select" aria-label="皮肤模式"><option value="system">跟随系统</option><option value="light">浅色模式</option><option value="dark">深色模式</option></select><div id="stats" class="stats"></div></div>
   </header>
   <div id="workspace-shell">
@@ -17,9 +17,8 @@
       <div class="sidebar-nav" role="tablist" aria-label="模块切换">
         <button id="module-tasks" class="sidebar-nav-item active" role="tab"><span>▣</span><span>任务管理</span></button>
         <button id="module-session" class="sidebar-nav-item" role="tab"><span>◌</span><span>会话管理</span></button>
-        <button id="sidebar-toggle" class="sidebar-nav-item sidebar-toggle" type="button" title="收起侧边栏" aria-label="收起侧边栏"><span>‹</span><span>收起侧边栏</span></button>
       </div>
-      <div id="task-sidebar" class="sidebar-panel"><button id="sidebar-new-task" class="sidebar-action">＋ 新建任务</button><div id="task-groups" class="task-groups"></div></div>
+      <div id="task-sidebar" class="sidebar-panel"><button id="sidebar-new-task" class="sidebar-action"><span class="group-icon">＋</span><span class="group-label">新建任务</span></button><div id="task-groups" class="task-groups"></div></div>
       <div id="session-sidebar" class="sidebar-panel hidden"><div id="session-tree"></div></div>
     </aside>
     <main id="workspace-main">
@@ -34,6 +33,6 @@
     </main>
   </div>
   <div id="modal-root"></div><div id="toast-root"></div>
-  <script type="module" src="app.js?v=tui-only-30"></script>
+  <script type="module" src="app.js?v=tui-only-32"></script>
 </body>
 </html>
