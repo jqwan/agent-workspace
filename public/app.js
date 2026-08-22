@@ -200,8 +200,9 @@ async function openNativeTui() {
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
       terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: 'Consolas, "Cascadia Mono", "SFMono-Regular", monospace', theme: terminalTheme() });
       terminal.attachCustomKeyEventHandler((event) => {
-        if (event.type !== 'keydown' || !event.ctrlKey) return true;
+        if (event.type !== 'keydown') return true;
         const key = event.key.toLowerCase();
+        if (!event.ctrlKey && !(event.metaKey && key === 'v')) return true;
         if (key === 'c' && terminal.hasSelection()) {
           event.preventDefault();
           event.stopPropagation();
@@ -213,8 +214,11 @@ async function openNativeTui() {
         if (key === 'v') {
           event.preventDefault();
           event.stopPropagation();
-          if (navigator.clipboard) void navigator.clipboard.readText().then((text) => { if (text) terminal?.paste(text); }).catch(() => toast('粘贴失败，请使用右键菜单', 'error'));
-          else toast('粘贴失败，请使用右键菜单', 'error');
+          // Let pi read the native macOS clipboard. Its Ctrl+V handler can
+          // save clipboard images to a temp file and insert the path, while
+          // still falling back to plain text paste.
+          if (tuiSocket?.readyState === WebSocket.OPEN) tuiSocket.send(JSON.stringify({ type: 'tui_input', data: '\x16' }));
+          else toast('粘贴失败，请先连接会话', 'error');
           return false;
         }
         return true;

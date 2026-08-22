@@ -1,11 +1,11 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
-  ROOT, DATA_DIR, SESSIONS_DIR, PROJECTS_ROOT, CONFIG_FILE,
+  ROOT, DATA_DIR, SESSIONS_DIR, CONFIG_FILE,
   loadTasks, listTasks, getTask, createTask, updateTask, deleteTask,
 } from './lib/store.js';
 import { parseSessionFile, evaluateRunningTask, extractText } from './lib/session.js';
@@ -111,10 +111,9 @@ function resolveWorkingDir(value) {
   let input = String(value || '').trim();
   if (!input || input.includes('\0')) return null;
   if (input === '~' || input.startsWith('~/')) input = path.join(process.env.HOME || '', input.slice(1));
-  // path.isAbsolute follows the host default. Check win32 explicitly too so
-  // persisted C:\\... and UNC paths remain absolute in every Windows shell.
-  if (path.win32.isAbsolute(input)) return path.win32.normalize(input);
-  return path.resolve(path.isAbsolute(input) ? input : path.join(PROJECTS_ROOT, input));
+  if (process.platform === 'win32' && path.win32.isAbsolute(input)) return path.win32.normalize(input);
+  if (!path.isAbsolute(input)) return null;
+  return path.normalize(input);
 }
 function concurrencyFull(extra = 0) {
   return config.maxConcurrent > 0 && listTasks().filter((task) => task.status === 'running').length + extra > config.maxConcurrent;
@@ -399,12 +398,7 @@ app.post('/api/select-directory', (_req, res) => {
     res.json({ path: selected });
   });
 });
-app.get('/api/dirs', (_req, res) => {
-  let dirs = [];
-  try { dirs = readdirSync(PROJECTS_ROOT).filter((name) => { try { return statSync(path.join(PROJECTS_ROOT, name)).isDirectory(); } catch { return false; } }).sort(); } catch { /* ignore */ }
-  res.json({ root: PROJECTS_ROOT, dirs });
-});
-app.get('/api/config', (_req, res) => res.json({ ...config, projectsRoot: PROJECTS_ROOT, sessionsDir: SESSIONS_DIR }));
+app.get('/api/config', (_req, res) => res.json({ ...config, sessionsDir: SESSIONS_DIR }));
 app.post('/api/config', (req, res) => {
   for (const key of ['maxConcurrent', 'approvePi']) if (key in (req.body || {})) config[key] = req.body[key];
   saveConfig();
