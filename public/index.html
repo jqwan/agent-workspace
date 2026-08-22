@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>工作台</title>
-  <link rel="stylesheet" href="style.css?v=tui-only-26">
+  <link rel="stylesheet" href="style.css?v=tui-only-41">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
@@ -22,7 +22,7 @@
       <div id="session-sidebar" class="sidebar-panel hidden"><div id="session-tree"></div></div>
     </aside>
     <main id="workspace-main">
-      <section class="toolbar" id="task-toolbar"><select id="sort"><option value="updated">最近更新</option><option value="created">创建时间（新→旧）</option><option value="deadline">Deadline（近→远）</option></select><input id="search" type="search" placeholder="搜索标题或内容"></section>
+      <section class="toolbar" id="task-toolbar"><select id="sort"><option value="updated">最近更新</option><option value="created">创建时间（新→旧）</option><option value="deadline">Deadline（近→远）</option></select><select id="board-group" aria-label="看板分布"><option value="single">单看板</option></select><select id="board-card-layout" aria-label="卡片布局"><option value="single">单列布局</option><option value="compact">紧凑布局</option></select><input id="search" type="search" placeholder="搜索标题或内容"></section>
       <section id="task-list" class="module-view"></section>
       <section id="session-view" class="module-view hidden">
         <div class="session-layout"><div class="session-main">
@@ -33,6 +33,6 @@
     </main>
   </div>
   <div id="modal-root"></div><div id="toast-root"></div>
-  <script type="module" src="app.js?v=tui-only-34"></script>
+  <script type="module" src="app.js?v=tui-only-51"></script>
 </body>
 </html>

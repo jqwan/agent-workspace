@@ -4,7 +4,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS = { todo: { label: '待办', cls: 'todo' }, running: { label: '处理中', cls: 'running' }, done: { label: '已完成', cls: 'done' }, archived: { label: '已废弃', cls: 'archived' } };
 const COLORS = { red: { label: '红色' }, orange: { label: '橙色' }, yellow: { label: '黄色' }, green: { label: '绿色' }, cyan: { label: '青色' }, blue: { label: '蓝色' }, purple: { label: '紫色' }, gray: { label: '灰色' } };
 const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
-const state = { tasks: [], status: '', sort: 'updated', search: '', signature: '', sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false, collapsedSessionTasks: new Set() };
+const state = { tasks: [], status: '', boardGroup: 'single', boardCardLayout: 'single', sort: 'updated', search: '', signature: '', sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false, collapsedSessionTasks: new Set() };
 let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
@@ -14,15 +14,29 @@ let terminalCursorSubscription = null;
 let tuiOpening = null;
 
 function taskColor(task) { return COLORS[task.color] ? task.color : (LEGACY_COLOR[task.priority] || 'blue'); }
+function hiddenWorkingDirs() {
+  try { const parsed = JSON.parse(localStorage.getItem('workbench-hidden-working-dirs') || '[]'); if (Array.isArray(parsed)) return parsed; } catch { /* ignore malformed browser data */ }
+  return [];
+}
 function recentWorkingDirs() {
   let saved = [];
   try { const parsed = JSON.parse(localStorage.getItem('workbench-working-dirs') || '[]'); if (Array.isArray(parsed)) saved = parsed; } catch { /* ignore malformed browser data */ }
-  return [...new Set([...saved, ...state.tasks.map((task) => task.workingDir)].filter(Boolean))].slice(0, 12);
+  const hidden = new Set(hiddenWorkingDirs());
+  return [...new Set([...saved, ...state.tasks.map((task) => task.workingDir)].filter((item) => item && !hidden.has(item)))].slice(0, 12);
 }
 function rememberWorkingDir(value) {
   const dir = String(value || '').trim();
   if (!dir) return;
+  localStorage.setItem('workbench-hidden-working-dirs', JSON.stringify(hiddenWorkingDirs().filter((item) => item !== dir)));
   localStorage.setItem('workbench-working-dirs', JSON.stringify([dir, ...recentWorkingDirs().filter((item) => item !== dir)].slice(0, 12)));
+}
+function forgetWorkingDir(value) {
+  const dir = String(value || '').trim();
+  if (!dir) return;
+  let saved = [];
+  try { const parsed = JSON.parse(localStorage.getItem('workbench-working-dirs') || '[]'); if (Array.isArray(parsed)) saved = parsed; } catch { /* ignore malformed browser data */ }
+  localStorage.setItem('workbench-working-dirs', JSON.stringify(saved.filter((item) => item !== dir)));
+  localStorage.setItem('workbench-hidden-working-dirs', JSON.stringify([dir, ...hiddenWorkingDirs().filter((item) => item !== dir)].slice(0, 50)));
 }
 function applyTheme(theme) {
   document.body.classList.toggle('theme-light', theme === 'light');
@@ -46,7 +60,7 @@ function applySidebarCollapsed(collapsed) {
   button.setAttribute('aria-expanded', String(!collapsed));
 }
 applySidebarCollapsed(localStorage.getItem('workbench-sidebar-collapsed') === 'true');
-window.addEventListener('resize', syncViewportHeight);
+window.addEventListener('resize', () => { syncViewportHeight(); syncMasonryColumns(); syncOverflowTooltips(); });
 window.visualViewport?.addEventListener('resize', syncViewportHeight);
 
 async function api(path, options = {}) {
@@ -65,6 +79,25 @@ function toast(message, type = '') {
   setTimeout(() => { node.classList.add('out'); setTimeout(() => node.remove(), 300); }, 3500);
 }
 function currentTask(id) { return state.tasks.find((task) => task.id === id); }
+function syncMasonryColumns(root = document) {
+  const board = root.querySelector('.task-board');
+  if (board && board.clientWidth > 0) {
+    const count = board.querySelectorAll(':scope > .task-board-column').length || 1;
+    const maxColumns = Math.max(1, Math.floor((board.clientWidth + 14) / 374));
+    board.style.columnCount = String(Math.min(count, maxColumns));
+  }
+  root.querySelectorAll('.compact-card-layout .task-board-list').forEach((list) => {
+    if (list.clientWidth <= 0) return;
+    const count = list.querySelectorAll(':scope > .card').length || 1;
+    const maxColumns = Math.max(1, Math.floor((list.clientWidth + 10) / 260));
+    list.style.columnCount = String(Math.min(count, maxColumns));
+  });
+}
+function syncOverflowTooltips(root = document) {
+  root.querySelectorAll('[data-tooltip]').forEach((node) => {
+    node.title = node.scrollWidth > node.clientWidth || node.scrollHeight > node.clientHeight + 1 ? node.dataset.tooltip : '';
+  });
+}
 function formatCount(value = 0) {
   if (value < 1000) return String(value);
   if (value < 10000) return `${(value / 1000).toFixed(1)}k`;
@@ -81,12 +114,12 @@ function renderStats() {
 const GROUP_ICONS = { '': '▦', todo: '○', running: '◐', done: '✓', archived: '✕' };
 function renderTaskSidebar() {
   $('#task-groups').innerHTML = [{ key: '', label: '全部任务' }, ...Object.entries(STATUS).map(([key, value]) => ({ key, label: value.label }))].map(({ key, label }) => {
-    const count = key ? state.tasks.filter((task) => task.status === key).length : state.tasks.filter((task) => task.status !== 'archived').length;
+    const count = key ? state.tasks.filter((task) => task.status === key).length : state.tasks.length;
     return `<button class="task-group-item${state.status === key ? ' active' : ''}" data-task-filter="${key}"><span class="group-icon">${GROUP_ICONS[key] || '•'}</span><span class="group-label">${esc(label)}</span><b>${count}</b></button>`;
   }).join('');
 }
 function visibleTasks() {
-  return state.tasks.filter((task) => (state.status ? task.status === state.status : task.status !== 'archived') && (!state.search || `${task.title} ${task.description}`.toLowerCase().includes(state.search.toLowerCase()))).sort((a, b) => {
+  return state.tasks.filter((task) => (state.status ? task.status === state.status : true) && (!state.search || `${task.title} ${task.description}`.toLowerCase().includes(state.search.toLowerCase()))).sort((a, b) => {
     if (state.sort === 'deadline') return (a.deadline ? new Date(a.deadline).getTime() : Infinity) - (b.deadline ? new Date(b.deadline).getTime() : Infinity) || new Date(b.updatedAt) - new Date(a.updatedAt);
     if (state.sort === 'created') return new Date(b.createdAt) - new Date(a.createdAt);
     return new Date(b.updatedAt) - new Date(a.updatedAt);
@@ -102,18 +135,44 @@ function card(task, compact = false) {
   const stats = task.stats || {};
   const archiveInfo = task.status === 'archived' ? `<div class="archive-info">已废弃 · ${time(task.archivedAt)} · ${task.purgeAt ? `预计 ${time(task.purgeAt)} 自动删除` : ''}</div>` : '';
   const statHtml = compact ? '' : `<div class="task-stats"><span>会话 ${stats.sessions || 0}</span><span>消息 ${stats.messages || 0}</span><span>输入 ${formatCount(stats.inputTokens || 0)}</span><span>输出 ${formatCount(stats.outputTokens || 0)}</span><span>Token ${formatCount(stats.totalTokens || 0)}</span>${stats.cost ? `<span>成本 $${Number(stats.cost).toFixed(4)}</span>` : ''}</div>`;
-  const folder = task.workingDir ? `<span class="task-folder" title="${esc(task.workingDir)}">📁 ${esc(task.workingDir)}</span>` : '';
-  return `<article class="card ${task.status} color-${taskColor(task)}${compact ? ' compact' : ''}"><div class="card-head"><h3 class="card-title">${esc(task.title)}</h3>${folder}<span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">⏰ ${deadline(task.deadline)}${task.overdue ? ' 逾期' : ''}</span>` : ''}</div><p class="card-desc">${esc(task.description)}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+  const folder = task.workingDir ? `<span class="task-folder" data-tooltip="${esc(task.workingDir)}">📁 ${esc(task.workingDir)}</span>` : '';
+  return `<article class="card ${task.status} color-${taskColor(task)}${compact ? ' compact' : ''}"><div class="card-head"><div class="card-heading"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3>${folder}</div><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">⏰ ${deadline(task.deadline)}${task.overdue ? ' 逾期' : ''}</span>` : ''}</div><p class="card-desc" data-tooltip="${esc(task.description)}">${esc(task.description)}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+}
+function syncBoardGroupOptions() {
+  const options = [{ value: 'single', label: '单看板' }];
+  if (!state.status) options.push({ value: 'status', label: '按任务状态分布' });
+  options.push({ value: 'path', label: '按工作路径分布' }, { value: 'color', label: '按颜色分布' });
+  if (!options.some((option) => option.value === state.boardGroup)) state.boardGroup = 'single';
+  $('#board-group').innerHTML = options.map((option) => `<option value="${option.value}">${option.label}</option>`).join('');
+  $('#board-group').value = state.boardGroup;
+}
+function boardGroups(tasks) {
+  if (state.boardGroup === 'path') {
+    const groups = new Map();
+    tasks.forEach((task) => {
+      const key = task.workingDir || '未设置工作路径';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(task);
+    });
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, 'zh-CN')).map(([label, items]) => ({ label, items }));
+  }
+  if (state.boardGroup === 'color') {
+    return Object.entries(COLORS).map(([key, value]) => ({ label: value.label, items: tasks.filter((task) => taskColor(task) === key) })).filter((group) => group.items.length > 0);
+  }
+  if (state.boardGroup === 'status' && !state.status) {
+    return Object.keys(STATUS).map((key) => ({ label: STATUS[key].label, badgeClass: key, items: tasks.filter((task) => task.status === key) })).filter((group) => group.items.length > 0);
+  }
+  return [{ label: state.status ? STATUS[state.status]?.label || '当前分组' : '全部任务', items: tasks }];
 }
 function renderList() {
-  document.body.classList.toggle('board-mode', !state.status);
+  document.body.classList.add('board-mode');
+  syncBoardGroupOptions();
   const tasks = visibleTasks();
-  if (!state.status) {
-    $('#task-list').innerHTML = `<div class="task-board">${['todo', 'running', 'done'].map((key) => `<section class="task-board-column"><header class="task-board-head"><span class="badge ${key}">${STATUS[key].label}</span><b>${tasks.filter((task) => task.status === key).length}</b></header><div class="task-board-list">${tasks.filter((task) => task.status === key).map((task) => card(task, true)).join('') || '<div class="task-board-empty">暂无任务</div>'}</div></section>`).join('')}</div>`;
-    return;
-  }
+  const groups = boardGroups(tasks);
   const clearArchived = state.status === 'archived' && tasks.length ? '<div class="archive-actions"><button class="danger" data-action="purge-archived">全部清空</button></div>' : '';
-  $('#task-list').innerHTML = clearArchived + (tasks.length ? tasks.map((task) => card(task)).join('') : '<div class="empty">没有符合条件的任务</div>');
+  $('#task-list').innerHTML = clearArchived + `<div class="task-board${state.boardCardLayout === 'compact' ? ' compact-card-layout' : ''}">${groups.map((group) => `<section class="task-board-column"><header class="task-board-head"><span class="badge ${group.badgeClass || 'board-group-badge'}" title="${esc(group.label)}">${esc(group.label)}</span><b>${group.items.length}</b></header><div class="task-board-list">${group.items.map((task) => card(task, true)).join('') || '<div class="task-board-empty">暂无任务</div>'}</div></section>`).join('') || '<div class="task-board-empty">暂无任务</div>'}</div>`;
+  syncMasonryColumns($('#task-list'));
+  syncOverflowTooltips($('#task-list'));
 }
 
 function sessionTasks() {
@@ -299,12 +358,37 @@ function modal(html) {
 }
 function closeModal() { $('#modal-root').innerHTML = ''; }
 function openTaskForm(task = null) {
-  const recent = recentWorkingDirs().map((dir) => `<option value="${esc(dir)}">${esc(dir)}</option>`).join('');
-  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label>标题<input id="task-title" value="${esc(task?.title || '')}"></label><label>工作目录路径<div class="path-picker-row"><input id="task-working-dir" value="${esc(task?.workingDir || '')}"><select id="recent-task-dir"><option value="">选择已使用的文件夹</option>${recent}</select><button type="button" id="choose-task-dir">选择文件夹</button></div></label><label>内容描述<textarea id="task-desc" rows="7">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色标签<div id="color-picker" class="color-picker">${Object.entries(COLORS).map(([key, value]) => `<button type="button" class="color-option color-${key}${taskColor(task || {}) === key ? ' active' : ''}" data-color-value="${key}" aria-label="${value.label}"><span></span></button>`).join('')}</div><input type="hidden" id="task-color" value="${taskColor(task || {})}"></label><label>截止时间<input id="task-deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button class="primary" id="save-task">${task ? '保存' : '创建'}</button><button data-close>取消</button></div>`);
+  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label>标题<input id="task-title" value="${esc(task?.title || '')}"></label><label>工作目录路径<div class="path-picker-row"><input id="task-working-dir" value="${esc(task?.workingDir || '')}"><div class="recent-dir-picker"><button type="button" id="recent-task-dir-toggle" class="recent-dir-toggle">选择已使用的文件夹</button><div id="recent-task-dir-list" class="recent-dir-list hidden"></div></div><button type="button" id="choose-task-dir">选择文件夹</button></div></label><label>内容描述<textarea id="task-desc" rows="7">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色标签<div id="color-picker" class="color-picker">${Object.entries(COLORS).map(([key, value]) => `<button type="button" class="color-option color-${key}${taskColor(task || {}) === key ? ' active' : ''}" data-color-value="${key}" aria-label="${value.label}"><span></span></button>`).join('')}</div><input type="hidden" id="task-color" value="${taskColor(task || {})}"></label><label>截止时间<input id="task-deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button class="primary" id="save-task">${task ? '保存' : '创建'}</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   form.querySelectorAll('[data-color-value]').forEach((button) => { button.onclick = () => { $('#task-color', form).value = button.dataset.colorValue; form.querySelectorAll('[data-color-value]').forEach((item) => item.classList.toggle('active', item === button)); }; });
-  $('#recent-task-dir', form).onchange = (event) => { if (event.target.value) { $('#task-working-dir', form).value = event.target.value; event.target.value = ''; } };
-  $('#choose-task-dir', form).onclick = async () => { try { const result = await api('/select-directory', { method: 'POST' }); if (result.path) { rememberWorkingDir(result.path); $('#task-working-dir', form).value = result.path; } } catch (error) { toast(error.message, 'error'); } };
+  const recentToggle = $('#recent-task-dir-toggle', form);
+  const recentList = $('#recent-task-dir-list', form);
+  let recentDirValue = '';
+  const renderRecentOptions = () => {
+    const dirs = recentWorkingDirs();
+    recentList.innerHTML = dirs.length ? dirs.map((dir) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" data-recent-dir="${esc(dir)}">${esc(dir)}</button><button type="button" class="recent-dir-delete" data-remove-recent-dir="${esc(dir)}" aria-label="删除路径" title="删除路径">×</button></div>`).join('') : '<div class="recent-dir-empty">暂无已使用的文件夹</div>';
+    recentToggle.textContent = recentDirValue || '选择已使用的文件夹';
+    recentList.classList.add('hidden');
+  };
+  recentToggle.onclick = () => recentList.classList.toggle('hidden');
+  recentList.onclick = (event) => {
+    const remove = event.target.closest('[data-remove-recent-dir]');
+    if (remove) {
+      const value = remove.dataset.removeRecentDir;
+      forgetWorkingDir(value);
+      if ($('#task-working-dir', form).value === value) $('#task-working-dir', form).value = '';
+      recentDirValue = '';
+      renderRecentOptions();
+      return;
+    }
+    const option = event.target.closest('[data-recent-dir]');
+    if (!option) return;
+    recentDirValue = option.dataset.recentDir;
+    $('#task-working-dir', form).value = recentDirValue;
+    renderRecentOptions();
+  };
+  renderRecentOptions();
+  $('#choose-task-dir', form).onclick = async () => { try { const result = await api('/select-directory', { method: 'POST' }); if (result.path) { rememberWorkingDir(result.path); recentDirValue = result.path; $('#task-working-dir', form).value = result.path; renderRecentOptions(); } } catch (error) { toast(error.message, 'error'); } };
   $('#save-task', form).onclick = async () => { try { const workingDir = $('#task-working-dir', form).value.trim(); if (!workingDir) return toast('请选择工作目录', 'error'); rememberWorkingDir(workingDir); await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body: { title: $('#task-title', form).value, description: $('#task-desc', form).value, workingDir, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null } }); closeModal(); toast(task ? '任务已保存' : '任务已创建'); refresh(); } catch (error) { toast(error.message, 'error'); } };
 }
 async function openExecute(task) {
@@ -370,6 +454,7 @@ function switchModule(module) {
   $('#task-sidebar').classList.toggle('hidden', session); $('#session-sidebar').classList.toggle('hidden', !session);
   $('#task-toolbar').classList.toggle('hidden', session); $('#task-list').classList.toggle('hidden', session); $('#session-view').classList.toggle('hidden', !session);
   if (session) renderSessionTree();
+  else renderList();
 }
 
 $('#theme-select').onchange = (event) => { applyTheme(event.target.value); void restartTuiForTheme(); event.target.blur(); };
@@ -379,6 +464,8 @@ $('#module-session').onclick = () => switchModule('session');
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
   applySidebarCollapsed(collapsed);
+  syncMasonryColumns();
+  syncOverflowTooltips();
   localStorage.setItem('workbench-sidebar-collapsed', String(collapsed));
 };
 $('#sidebar-new-task').onclick = () => openTaskForm();
@@ -414,6 +501,8 @@ $('#session-tree').ondblclick = (event) => {
 };
 $('#task-groups').onclick = (event) => { const group = event.target.closest('[data-task-filter]'); if (group) { state.status = group.dataset.taskFilter || ''; renderTaskSidebar(); renderList(); } };
 $('#sort').onchange = (event) => { state.sort = event.target.value; renderList(); };
+$('#board-group').onchange = (event) => { state.boardGroup = event.target.value; renderList(); };
+$('#board-card-layout').onchange = (event) => { state.boardCardLayout = event.target.value; renderList(); };
 $('#search').oninput = (event) => { state.search = event.target.value; renderList(); };
 $('#task-list').onclick = async (event) => {
   const button = event.target.closest('[data-action]'); if (!button) return;
