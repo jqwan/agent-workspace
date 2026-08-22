@@ -9,10 +9,8 @@ let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
 let terminalResizeObserver = null;
-let terminalWheelHandler = null;
 let terminalImeCursorHandler = null;
 let terminalCursorSubscription = null;
-let terminalWheelRemainder = 0;
 let tuiOpening = null;
 
 function taskColor(task) { return COLORS[task.color] ? task.color : (LEGACY_COLOR[task.priority] || 'blue'); }
@@ -149,12 +147,11 @@ function disposeTerminal() {
   terminalResizeObserver?.disconnect(); terminalResizeObserver = null;
   terminalCursorSubscription?.dispose(); terminalCursorSubscription = null;
   const box = $('#session-terminal');
-  if (terminalWheelHandler) box.removeEventListener('wheel', terminalWheelHandler, true);
   if (terminalImeCursorHandler) {
     box.removeEventListener('compositionstart', terminalImeCursorHandler);
     box.removeEventListener('focusin', terminalImeCursorHandler);
   }
-  terminalWheelHandler = null; terminalImeCursorHandler = null; terminalWheelRemainder = 0;
+  terminalImeCursorHandler = null;
   try { terminal?.dispose(); } catch { /* already disposed */ }
   terminal = null; fitAddon = null;
   box.innerHTML = '';
@@ -204,21 +201,7 @@ async function openNativeTui() {
         try { fitAddon?.fit(); } catch { /* layout is changing */ }
         if (socket.readyState === WebSocket.OPEN && terminal) socket.send(JSON.stringify({ type: 'tui_resize', cols: terminal.cols, rows: terminal.rows }));
       };
-      terminalWheelHandler = (event) => {
-        if (event.ctrlKey || !terminal || socket.readyState !== WebSocket.OPEN) return;
-        event.preventDefault(); event.stopPropagation();
-        const pixels = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 24 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? event.deltaY * 240 : event.deltaY;
-        terminalWheelRemainder += pixels;
-        const steps = Math.min(8, Math.floor(Math.abs(terminalWheelRemainder) / 24));
-        if (!steps) return;
-        const rect = terminal.element?.getBoundingClientRect() || box.getBoundingClientRect();
-        const col = Math.max(1, Math.min(terminal.cols, Math.floor((event.clientX - rect.left) / rect.width * terminal.cols) + 1));
-        const row = Math.max(1, Math.min(terminal.rows, Math.floor((event.clientY - rect.top) / rect.height * terminal.rows) + 1));
-        const button = terminalWheelRemainder > 0 ? 65 : 64;
-        terminalWheelRemainder -= Math.sign(terminalWheelRemainder) * steps * 24;
-        socket.send(JSON.stringify({ type: 'tui_input', data: `\x1b[<${button};${col};${row}M`.repeat(steps) }));
-      };
-      box.addEventListener('wheel', terminalWheelHandler, { capture: true, passive: false });
+      // regular mode leaves wheel scrolling to xterm.js and its viewport.
       terminal.onData((data) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'tui_input', data })); });
       terminalResizeObserver = new ResizeObserver(sendSize); terminalResizeObserver.observe(box);
       socket.onopen = () => {
