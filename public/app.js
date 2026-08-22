@@ -4,7 +4,43 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS = { todo: { label: '待办', cls: 'todo' }, running: { label: '处理中', cls: 'running' }, done: { label: '已完成', cls: 'done' }, archived: { label: '已废弃', cls: 'archived' } };
 const COLORS = { red: { label: '红色' }, orange: { label: '橙色' }, yellow: { label: '黄色' }, green: { label: '绿色' }, cyan: { label: '青色' }, blue: { label: '蓝色' }, purple: { label: '紫色' }, gray: { label: '灰色' } };
 const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
-const state = { tasks: [], status: '', boardGroup: 'single', boardCardLayout: 'single', sort: 'updated', search: '', signature: '', sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false, collapsedSessionTasks: new Set() };
+const LAYOUT_STORAGE_KEY = 'workbench-layout';
+const state = { tasks: [], status: '', boardGroup: 'single', boardCardLayout: 'single', sort: 'updated', search: '', signature: '', module: 'tasks', sidebarCollapsed: false, sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false, collapsedSessionTasks: new Set() };
+function loadLayoutState() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || '{}') || {}; } catch { /* ignore malformed browser data */ }
+  if (saved.module === 'tasks' || saved.module === 'session') state.module = saved.module;
+  if (['', ...Object.keys(STATUS)].includes(saved.status)) state.status = saved.status;
+  if (['single', 'status', 'path', 'color'].includes(saved.boardGroup)) state.boardGroup = saved.boardGroup;
+  if (['single', 'compact'].includes(saved.boardCardLayout)) state.boardCardLayout = saved.boardCardLayout;
+  if (['updated', 'created', 'deadline'].includes(saved.sort)) state.sort = saved.sort;
+  if (typeof saved.search === 'string') state.search = saved.search;
+  if (typeof saved.sidebarCollapsed === 'boolean') state.sidebarCollapsed = saved.sidebarCollapsed;
+  else state.sidebarCollapsed = localStorage.getItem('workbench-sidebar-collapsed') === 'true';
+  if (typeof saved.sessionTask === 'string' && saved.sessionTask) state.sessionTask = saved.sessionTask;
+  if (typeof saved.sessionSessionId === 'string' && saved.sessionSessionId) state.sessionSessionId = saved.sessionSessionId;
+  if (typeof saved.sessionDescriptionOpen === 'boolean') state.sessionDescriptionOpen = saved.sessionDescriptionOpen;
+  if (Array.isArray(saved.collapsedSessionTasks)) state.collapsedSessionTasks = new Set(saved.collapsedSessionTasks.filter((id) => typeof id === 'string'));
+}
+function saveLayoutState() {
+  try {
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
+      module: state.module,
+      status: state.status,
+      boardGroup: state.boardGroup,
+      boardCardLayout: state.boardCardLayout,
+      sort: state.sort,
+      search: state.search,
+      sidebarCollapsed: state.sidebarCollapsed,
+      sessionTask: state.sessionTask,
+      sessionSessionId: state.sessionSessionId,
+      sessionDescriptionOpen: state.sessionDescriptionOpen,
+      collapsedSessionTasks: [...state.collapsedSessionTasks],
+    }));
+  } catch { /* ignore unavailable browser storage */ }
+}
+loadLayoutState();
+let layoutInitialized = false;
 let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
@@ -59,8 +95,12 @@ function applySidebarCollapsed(collapsed) {
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-expanded', String(!collapsed));
 }
-applySidebarCollapsed(localStorage.getItem('workbench-sidebar-collapsed') === 'true');
+applySidebarCollapsed(state.sidebarCollapsed);
+$('#sort').value = state.sort;
+$('#board-card-layout').value = state.boardCardLayout;
+$('#search').value = state.search;
 window.addEventListener('resize', () => { syncViewportHeight(); syncMasonryColumns(); syncOverflowTooltips(); });
+window.addEventListener('pagehide', saveLayoutState);
 window.visualViewport?.addEventListener('resize', syncViewportHeight);
 
 async function api(path, options = {}) {
@@ -205,6 +245,20 @@ async function refresh() {
     renderStats(); renderTaskSidebar(); renderSessionTree();
     if (signature !== state.signature && !$('.modal')) renderList();
     state.signature = signature;
+    if (!layoutInitialized) {
+      layoutInitialized = true;
+      if (state.module === 'session') {
+        switchModule('session');
+        const task = currentTask(state.sessionTask);
+        if (task && ['todo', 'running'].includes(task.status) && task.sessions?.length) selectSession(task.id, state.sessionSessionId);
+        else {
+          state.sessionTask = null;
+          state.sessionSessionId = 'main';
+          renderSessionTree();
+          saveLayoutState();
+        }
+      }
+    }
   } catch (error) { toast(error.message, 'error'); }
 }
 
@@ -347,6 +401,7 @@ function selectSession(taskId, sessionId = 'main') {
   const target = task?.sessions?.find((session) => session.id === sessionId);
   state.sessionSessionId = target?.id || task?.activeSessionId || task?.sessions?.[0]?.id || 'main';
   renderSessionTree();
+  saveLayoutState();
   if (taskId) void openNativeTui();
 }
 
@@ -449,6 +504,8 @@ function openDeleteSessionModal(task, sessionId) {
 }
 function switchModule(module) {
   const session = module === 'session';
+  state.module = session ? 'session' : 'tasks';
+  saveLayoutState();
   document.body.classList.toggle('session-mode', session);
   $('#module-session').classList.toggle('active', session); $('#module-tasks').classList.toggle('active', !session);
   $('#task-sidebar').classList.toggle('hidden', session); $('#session-sidebar').classList.toggle('hidden', !session);
@@ -463,10 +520,12 @@ $('#module-tasks').onclick = () => switchModule('tasks');
 $('#module-session').onclick = () => switchModule('session');
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
+  state.sidebarCollapsed = collapsed;
   applySidebarCollapsed(collapsed);
   syncMasonryColumns();
   syncOverflowTooltips();
   localStorage.setItem('workbench-sidebar-collapsed', String(collapsed));
+  saveLayoutState();
 };
 $('#sidebar-new-task').onclick = () => openTaskForm();
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
@@ -474,11 +533,13 @@ $('#session-title').onclick = () => {
   if (!currentTask(state.sessionTask)) return;
   state.sessionDescriptionOpen = !state.sessionDescriptionOpen;
   renderSessionHeader();
+  saveLayoutState();
 };
 document.addEventListener('click', (event) => {
   if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
     state.sessionDescriptionOpen = false;
     renderSessionHeader();
+    saveLayoutState();
   }
 });
 $('#session-restart').onclick = () => { detachTui(); void openNativeTui(); };
@@ -488,7 +549,7 @@ $('#session-tree').onclick = (event) => {
   const remove = event.target.closest('[data-delete-session]');
   if (remove) { event.stopPropagation(); const task = currentTask(remove.dataset.deleteSession); if (task) openDeleteSessionModal(task, remove.dataset.sessionId); return; }
   const group = event.target.closest('[data-session-group]');
-  if (group) { const id = group.dataset.sessionGroup; state.collapsedSessionTasks.has(id) ? state.collapsedSessionTasks.delete(id) : state.collapsedSessionTasks.add(id); renderSessionTree(); return; }
+  if (group) { const id = group.dataset.sessionGroup; state.collapsedSessionTasks.has(id) ? state.collapsedSessionTasks.delete(id) : state.collapsedSessionTasks.add(id); renderSessionTree(); saveLayoutState(); return; }
   const item = event.target.closest('[data-session-task]');
   if (item) selectSession(item.dataset.sessionTask, item.dataset.sessionId);
 };
@@ -499,11 +560,11 @@ $('#session-tree').ondblclick = (event) => {
   const session = task?.sessions?.find((child) => child.id === item.dataset.sessionId);
   if (task && session) openSessionModal(task, session);
 };
-$('#task-groups').onclick = (event) => { const group = event.target.closest('[data-task-filter]'); if (group) { state.status = group.dataset.taskFilter || ''; renderTaskSidebar(); renderList(); } };
-$('#sort').onchange = (event) => { state.sort = event.target.value; renderList(); };
-$('#board-group').onchange = (event) => { state.boardGroup = event.target.value; renderList(); };
-$('#board-card-layout').onchange = (event) => { state.boardCardLayout = event.target.value; renderList(); };
-$('#search').oninput = (event) => { state.search = event.target.value; renderList(); };
+$('#task-groups').onclick = (event) => { const group = event.target.closest('[data-task-filter]'); if (group) { state.status = group.dataset.taskFilter || ''; renderTaskSidebar(); renderList(); saveLayoutState(); } };
+$('#sort').onchange = (event) => { state.sort = event.target.value; renderList(); saveLayoutState(); };
+$('#board-group').onchange = (event) => { state.boardGroup = event.target.value; renderList(); saveLayoutState(); };
+$('#board-card-layout').onchange = (event) => { state.boardCardLayout = event.target.value; renderList(); saveLayoutState(); };
+$('#search').oninput = (event) => { state.search = event.target.value; renderList(); saveLayoutState(); };
 $('#task-list').onclick = async (event) => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   const task = currentTask(button.dataset.id);
