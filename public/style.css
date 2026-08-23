@@ -366,6 +366,7 @@ h1, h2, h3 { text-wrap: balance; }
 .task-folder { display: inline-flex; align-items: center; gap: 4px; max-width: 42%; overflow: hidden; color: var(--muted); font: 11px "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .task-folder svg, .deadline svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .deadline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.card-unread { flex: 0 0 auto; padding: 2px 6px; border-radius: 999px; background: var(--accent-strong); color: #fffaf4; font: 10px/1.4 "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
 .deadline.overdue { color: #c4472d; font-weight: 750; }
 .card-desc { margin: 5px 0 13px; color: var(--muted); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .card-desc.is-empty { color: var(--muted); font-style: italic; }

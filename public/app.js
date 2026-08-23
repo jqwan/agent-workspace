@@ -273,6 +273,7 @@ function actions(task) {
   if (task.status === 'done') return `${actionButton('session', task.id, '打开会话', 'open', 'primary')}${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
   return `${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
 }
+function taskUnreadCount(task) { return availableSessions(task).reduce((total, session) => total + (Number(session.unreadCount) || 0), 0); }
 function card(task, compact = false) {
   const stats = task.stats || {};
   const archiveInfo = task.status === 'archived' ? `<div class="archive-info">已废弃 · ${time(task.archivedAt)} · ${task.purgeAt ? `预计 ${time(task.purgeAt)} 自动删除` : ''}</div>` : '';
@@ -281,7 +282,9 @@ function card(task, compact = false) {
   const description = task.description?.trim() ? esc(task.description) : '暂无描述';
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
-  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3>${folder}</div><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.clock} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+  const unread = taskUnreadCount(task);
+  const unreadBadge = unread ? `<span class="card-unread" title="${unread}条未读消息" aria-label="${unread}条未读消息">未读 ${number(unread)}</span>` : '';
+  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3>${folder}</div><span class="spacer"></span>${unreadBadge}${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.clock} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
 }
 function syncBoardGroupOptions() {
   const options = [{ value: 'single', label: '全部' }];
