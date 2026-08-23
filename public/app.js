@@ -769,9 +769,9 @@ $('#copy-session-file').onclick = async () => {
   const path = $('#session-file-path').textContent;
   if (!path) return;
   try {
-    await navigator.clipboard.writeText(path);
-    toast('会话文件路径已复制');
-  } catch { toast('复制失败，请手动选择路径', 'error'); }
+    await navigator.clipboard.writeText(`pi --session "${path}"`);
+    toast('pi 会话命令已复制');
+  } catch { toast('复制失败，请手动选择命令', 'error'); }
 };
 document.addEventListener('click', (event) => {
   if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
