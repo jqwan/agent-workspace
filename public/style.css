@@ -367,7 +367,7 @@ h1, h2, h3 { text-wrap: balance; }
 .task-folder { display: inline-flex; align-items: center; gap: 4px; max-width: 42%; overflow: hidden; color: var(--muted); font: 11px "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .task-folder svg, .deadline svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .deadline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.card-unread { flex: 0 0 auto; padding: 2px 6px; border-radius: 999px; background: var(--accent-strong); color: #fffaf4; font: 10px/1.4 "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+.card-unread { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-strong); }
 .deadline.overdue { color: #c4472d; font-weight: 750; }
 .card-desc { margin: 5px 0 13px; color: var(--muted); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .card-desc.is-empty { color: var(--muted); font-style: italic; }
@@ -502,10 +502,10 @@ body.session-mode .sidebar-panel { padding-top: 12px; }
 .session-task-group { margin: 4px 0 10px; }
 .session-task-group { min-width: 0; }
 .session-task-heading { display: flex; align-items: center; gap: 4px; }
-.session-task-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; padding: 8px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); font-weight: 700; cursor: pointer; text-align: left; }
+.session-task-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden; padding: 8px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); font-weight: 700; cursor: pointer; text-align: left; }
 .session-task-title:hover { border-color: var(--line); }
 .session-task-title span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-task-unread { margin-left: auto; padding: 1px 5px; border-radius: 999px; background: var(--accent-strong); color: #fffaf4; font: 10px/1.4 "SFMono-Regular", Consolas, monospace; }
+.session-task-unread { flex: 0 0 8px; width: 8px; height: 8px; margin-left: auto; padding: 0; border-radius: 50%; background: var(--accent-strong); }
 .session-new-child { flex: 0 0 auto; border: 0; background: transparent; padding: 4px; color: var(--teal); font-size: 16px; }
 .session-new-child:hover { background: transparent; border-color: transparent; color: var(--accent-strong); }
 .session-remove-task { flex: 0 0 auto; border: 0; background: transparent; padding: 4px; color: var(--muted); font-size: 16px; }
@@ -517,7 +517,7 @@ body.session-mode .sidebar-panel { padding-top: 12px; }
 .session-child-session:focus-within { background: var(--surface-muted); color: var(--ink); }
 .session-child-session.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent-strong); font-weight: 700; }
 .child-dot { color: var(--teal); font-size: 10px; }
-.session-unread { min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--accent-strong); color: #fffaf4; font: 10px/1.4 "SFMono-Regular", Consolas, monospace; text-align: center; }
+.session-unread { flex: 0 0 7px; width: 7px; height: 7px; padding: 0; border-radius: 50%; background: var(--accent-strong); }
 .session-child-delete { flex: 0 0 auto; margin-left: auto; border: 0; background: transparent; padding: 4px 8px 4px 4px; color: var(--muted); font-size: 16px; }
 .session-child-delete:hover { background: transparent; border-color: transparent; color: var(--accent-strong); }
 .sidebar-empty { padding: 30px 8px; }
@@ -526,6 +526,12 @@ body.session-mode .sidebar-panel { padding-top: 12px; }
 .session-header { height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .session-context { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .session-context-icon { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 7px 7px 7px 2px; background: var(--accent-strong); color: #fffaf4; font: 18px Georgia, serif; }
+.session-context-copy { min-width: 0; }
+.session-file-row { display: flex; align-items: center; gap: 4px; max-width: 520px; }
+.session-file-path { display: block; min-width: 0; overflow: hidden; color: var(--muted); font: 10px/1.2 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.session-file-copy { flex: 0 0 auto; padding: 0 3px; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; }
+.session-file-copy:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--accent-strong); }
+.session-file-copy:disabled { visibility: hidden; }
 .session-eyebrow { color: var(--muted); font: 10px/1.2 "SFMono-Regular", Consolas, monospace; }
 .session-title-button { display: block; max-width: 440px; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 14px; font-weight: 700; font-family: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .session-title-button:hover { border-color: transparent; background: transparent; color: var(--accent-strong); }

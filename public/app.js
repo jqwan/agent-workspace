@@ -1,86 +1,17 @@
 import { cost, deadline, esc, number, time } from './ui/format.js';
+import { api } from './ui/api.js';
+import {
+  COLORS, STATUS, colorCatalog, customColors, saveCustomColors, state, taskColor,
+  loadLayoutState, saveLayoutState, trimCustomColors,
+} from './ui/state.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
-const STATUS = { todo: { label: '待办', cls: 'todo' }, running: { label: '处理中', cls: 'running' }, done: { label: '已完成', cls: 'done' }, archived: { label: '已废弃', cls: 'archived' } };
-const COLORS = {
-  red: { label: '#DF7468', value: '#df7468' },
-  orange: { label: '#E59654', value: '#e59654' },
-  yellow: { label: '#D3B13E', value: '#d3b13e' },
-  green: { label: '#6EAA7B', value: '#6eaa7b' },
-  cyan: { label: '#4DA9A4', value: '#4da9a4' },
-  blue: { label: '#7098C0', value: '#7098c0' },
-  purple: { label: '#A184B6', value: '#a184b6' },
-  gray: { label: '#96A5A7', value: '#96a5a7' },
-};
-const CUSTOM_COLORS_STORAGE_KEY = 'workbench-custom-colors';
-const MAX_COLOR_COUNT = 17;
-const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
-function loadCustomColors() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(CUSTOM_COLORS_STORAGE_KEY) || '{}');
-    if (!parsed || typeof parsed !== 'object') return {};
-    return Object.fromEntries(Object.entries(parsed).filter(([key, value]) => /^custom-[a-z0-9-]+$/.test(key) && value && /^#[0-9a-f]{6}$/i.test(value.value)).map(([key, value]) => [key, { label: value.value.toUpperCase(), value: value.value.toLowerCase(), createdAt: Number(value.createdAt) || 0 }]));
-  } catch { return {}; }
-}
-let customColors = loadCustomColors();
-function colorCatalog() { return { ...COLORS, ...customColors }; }
-function saveCustomColors() {
-  try { localStorage.setItem(CUSTOM_COLORS_STORAGE_KEY, JSON.stringify(customColors)); } catch { /* ignore unavailable browser storage */ }
-}
-function trimCustomColors(maxColorCount = MAX_COLOR_COUNT) {
-  const maxCustomColors = Math.max(0, maxColorCount - Object.keys(COLORS).length);
-  const removed = [];
-  while (Object.keys(customColors).length > maxCustomColors) {
-    const key = Object.keys(customColors).sort((a, b) => (customColors[a].createdAt || 0) - (customColors[b].createdAt || 0))[0];
-    if (!key) break;
-    removed.push(key);
-    delete customColors[key];
-  }
-  if (removed.length) saveCustomColors();
-  return removed;
-}
-function taskColor(task) { return colorCatalog()[task.color] ? task.color : (LEGACY_COLOR[task.priority] || 'blue'); }
+
 function customColorStyle(key) {
   const color = customColors[key];
   return color ? ` style="--task-color:${esc(color.value)}"` : '';
 }
-const LAYOUT_STORAGE_KEY = 'workbench-layout';
-const state = { tasks: [], status: '', boardGroup: 'single', boardCardLayout: 'single', sort: 'updated', search: '', signature: '', module: 'tasks', sidebarCollapsed: false, sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false, collapsedSessionTasks: new Set(), hiddenCompletedSessionTasks: new Set() };
-function loadLayoutState() {
-  let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || '{}') || {}; } catch { /* ignore malformed browser data */ }
-  if (saved.module === 'tasks' || saved.module === 'session') state.module = saved.module;
-  if (['', ...Object.keys(STATUS)].includes(saved.status)) state.status = saved.status;
-  if (['single', 'status', 'path', 'color'].includes(saved.boardGroup)) state.boardGroup = saved.boardGroup;
-  if (['single', 'compact'].includes(saved.boardCardLayout)) state.boardCardLayout = saved.boardCardLayout;
-  if (['updated', 'created', 'deadline'].includes(saved.sort)) state.sort = saved.sort;
-  if (typeof saved.search === 'string') state.search = saved.search;
-  if (typeof saved.sidebarCollapsed === 'boolean') state.sidebarCollapsed = saved.sidebarCollapsed;
-  else state.sidebarCollapsed = localStorage.getItem('workbench-sidebar-collapsed') === 'true';
-  if (typeof saved.sessionTask === 'string' && saved.sessionTask) state.sessionTask = saved.sessionTask;
-  if (typeof saved.sessionSessionId === 'string' && saved.sessionSessionId) state.sessionSessionId = saved.sessionSessionId;
-  if (typeof saved.sessionDescriptionOpen === 'boolean') state.sessionDescriptionOpen = saved.sessionDescriptionOpen;
-  if (Array.isArray(saved.collapsedSessionTasks)) state.collapsedSessionTasks = new Set(saved.collapsedSessionTasks.filter((id) => typeof id === 'string'));
-  if (Array.isArray(saved.hiddenCompletedSessionTasks)) state.hiddenCompletedSessionTasks = new Set(saved.hiddenCompletedSessionTasks.filter((id) => typeof id === 'string'));
-}
-function saveLayoutState() {
-  try {
-    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
-      module: state.module,
-      status: state.status,
-      boardGroup: state.boardGroup,
-      boardCardLayout: state.boardCardLayout,
-      sort: state.sort,
-      search: state.search,
-      sidebarCollapsed: state.sidebarCollapsed,
-      sessionTask: state.sessionTask,
-      sessionSessionId: state.sessionSessionId,
-      sessionDescriptionOpen: state.sessionDescriptionOpen,
-      collapsedSessionTasks: [...state.collapsedSessionTasks],
-      hiddenCompletedSessionTasks: [...state.hiddenCompletedSessionTasks],
-    }));
-  } catch { /* ignore unavailable browser storage */ }
-}
+
 loadLayoutState();
 let layoutInitialized = false;
 let tuiSocket = null;
@@ -169,14 +100,6 @@ window.addEventListener('resize', () => { syncViewportHeight(); syncMasonryColum
 window.addEventListener('pagehide', saveLayoutState);
 window.visualViewport?.addEventListener('resize', syncViewportHeight);
 
-async function api(path, options = {}) {
-  const init = { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } };
-  if (options.body !== undefined) init.body = JSON.stringify(options.body);
-  const response = await fetch('/api' + path, init);
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-  return body;
-}
 function toast(message, type = '') {
   const node = document.createElement('div');
   node.className = `toast ${type}`;
@@ -284,7 +207,7 @@ function card(task, compact = false) {
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
   const unread = taskUnreadCount(task);
-  const unreadBadge = unread ? `<span class="card-unread" title="${unread}条未读消息" aria-label="${unread}条未读消息">${number(unread)}</span>` : '';
+  const unreadBadge = unread ? `<span class="card-unread" title="${unread}条未读消息" aria-label="${unread}条未读消息"></span>` : '';
   return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${unreadBadge}${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
 }
 function syncBoardGroupOptions() {
@@ -338,6 +261,9 @@ function renderSessionHeader() {
   $('#session-view').classList.toggle('no-session', !task);
   const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
   $('#session-title').textContent = child?.title || task?.title || '选择一个子会话';
+  $('#session-file-path').textContent = child?.sessionFile || '';
+  $('#session-file-path').title = child?.sessionFile || '会话文件路径';
+  $('#copy-session-file').disabled = !child?.sessionFile;
   $('#session-title').setAttribute('aria-expanded', String(Boolean(state.sessionDescriptionOpen && task)));
   $('#session-description-text').textContent = task?.description?.trim() || '暂无任务描述';
   $('#session-description-panel').classList.toggle('hidden', !state.sessionDescriptionOpen || !task);
@@ -356,7 +282,7 @@ function renderSessionTree() {
     const taskAction = task.status === 'done'
       ? `<button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`
       : `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button>`;
-    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}${taskUnread ? `，${taskUnread}条未读消息` : ''}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span>${taskUnread ? `<b class="session-task-unread" aria-label="${taskUnread}条未读消息">${number(taskUnread)}</b>` : ''}</button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const unread = Number(session.unreadCount) || 0; const title = session.title || `子会话 ${index + 1}`; return `<div class="session-child-session${state.sessionTask === task.id && state.sessionSessionId === session.id ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unread}条未读消息` : ''}"><span class="child-dot" aria-hidden="true">●</span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread" aria-label="${unread}条未读消息">${number(unread)}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
+    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}${taskUnread ? `，${taskUnread}条未读消息` : ''}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span>${taskUnread ? `<b class="session-task-unread" aria-label="${taskUnread}条未读消息"></b>` : ''}</button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const unread = Number(session.unreadCount) || 0; const title = session.title || `子会话 ${index + 1}`; return `<div class="session-child-session${state.sessionTask === task.id && state.sessionSessionId === session.id ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unread}条未读消息` : ''}"><span class="child-dot" aria-hidden="true">●</span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread" aria-label="${unread}条未读消息"></b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
   }).join('') : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
 }
 async function refresh() {
@@ -493,7 +419,7 @@ async function openNativeTui() {
           if (event.type === 'tui_reset') { terminal?.reset(); sendSize(); }
           else if (event.type === 'tui_data') {
             terminal?.write(event.data || '');
-            if (document.visibilityState === 'visible' && state.module === 'session' && state.sessionTask === taskId && state.sessionSessionId === sessionId) markSessionRead(taskId, sessionId);
+            if (document.visibilityState === 'visible' && state.module === 'session' && state.sessionTask === taskId && state.sessionSessionId === sessionId) markSessionRead(taskId, sessionId, true);
           }
           else if (event.type === 'tui_exit') terminal?.write(`\r\n\r\n[工作台] pi 已退出（${event.exitCode ?? '未知'}）。\r\n`);
           else if (event.type === 'tui_error') {
@@ -839,6 +765,14 @@ $('#session-title').onclick = () => {
   renderSessionHeader();
   saveLayoutState();
 };
+$('#copy-session-file').onclick = async () => {
+  const path = $('#session-file-path').textContent;
+  if (!path) return;
+  try {
+    await navigator.clipboard.writeText(path);
+    toast('会话文件路径已复制');
+  } catch { toast('复制失败，请手动选择路径', 'error'); }
+};
 document.addEventListener('click', (event) => {
   if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
     state.sessionDescriptionOpen = false;
@@ -942,5 +876,18 @@ $('#task-list').onclick = async (event) => {
   } catch (error) { toast(error.message, 'error'); }
 };
 
+let refreshTimer = null;
+function scheduleRefresh(delay = 100) {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => { refreshTimer = null; void refresh(); }, delay);
+}
+const taskEvents = new EventSource('/api/events');
+taskEvents.onmessage = ({ data }) => {
+  try {
+    if (JSON.parse(data).type === 'tasks_changed') scheduleRefresh();
+  } catch { /* ignore malformed event */ }
+};
+window.addEventListener('pagehide', () => taskEvents.close(), { once: true });
 refresh();
-setInterval(refresh, 3000);
+// SSE is the normal update path; this slower poll is only a recovery fallback.
+setInterval(refresh, 15000);
