@@ -211,7 +211,7 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
       if (!current) return;
       const currentSession = resolveTaskSession(current, childSession.id);
       persistSessionTitle(current, currentSession);
-      if (current.status !== 'running') return;
+      if (current.status !== 'running' || isWebTuiRunning(task.id)) return;
       updateTask(task.id, { lastRun: {
         status: exitCode === 0 ? 'done' : 'terminated',
         reason: exitCode === 0 ? null : `原生 TUI 已退出（exit code ${exitCode}）`, at: nowIso(),
@@ -348,7 +348,7 @@ app.delete('/api/tasks/:id/sessions/:sessionId', async (req, res) => {
   const index = sessions.findIndex((item) => item.id === req.params.sessionId);
   if (index < 0) return res.status(404).json({ error: '子会话不存在' });
   const [removed] = sessions.splice(index, 1);
-  if (isWebTuiRunning(task.id) && activeSessionIds.get(task.id) === removed.id) await stopTaskTui(task.id, { silent: true });
+  if (isWebTuiRunning(task.id, removed.id)) await stopTaskTui(task.id, { silent: true, sessionId: removed.id });
   try { if (existsSync(removed.sessionFile)) unlinkSync(removed.sessionFile); } catch { /* ignore */ }
   const patch = { sessions };
   if (task.sessionFile === removed.sessionFile) patch.sessionFile = sessions[0].sessionFile;
@@ -359,7 +359,7 @@ app.delete('/api/tasks/:id/sessions/:sessionId', async (req, res) => {
 app.post('/api/tasks/:id/tui/restart', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  const stopped = await stopWebTuiForRestart(task.id);
+  const stopped = await stopWebTuiForRestart(task.id, { sessionId: activeSessionIds.get(task.id) || null });
   res.json({ stopped });
 });
 app.post('/api/tasks/:id/terminate', async (req, res) => {
@@ -375,6 +375,7 @@ const webSockets = new WebSocketServer({ noServer: true });
 webSockets.on('connection', (ws) => {
   const clientId = randomUUID();
   let taskId = null;
+  let sessionId = null;
   let unsubscribe = null;
   const send = (message) => {
     if (ws.readyState === 1) ws.send(JSON.stringify(message));
@@ -389,12 +390,13 @@ webSockets.on('connection', (ws) => {
     try {
       await withTuiLock(id, () => openTaskTui(getTask(id), childSession, cols, rows, theme));
       markSessionRead(getTask(id), childSession);
-      if (taskId && taskId !== id) releaseWebTuiInput(taskId, clientId);
+      if (taskId && (taskId !== id || sessionId !== childSession.id)) releaseWebTuiInput(taskId, sessionId, clientId);
       taskId = id;
+      sessionId = childSession.id;
       unsubscribe?.();
-      unsubscribe = subscribeWebTui(id, send);
-      claimWebTuiInput(id, clientId);
-      resizeWebTui(id, cols, rows);
+      unsubscribe = subscribeWebTui(id, sessionId, send);
+      claimWebTuiInput(id, sessionId, clientId);
+      resizeWebTui(id, sessionId, cols, rows);
       send({ type: 'tui_ready', taskId: id, childSessionId: childSession.id });
     } catch (error) {
       const detail = error?.message || String(error);
@@ -409,9 +411,9 @@ webSockets.on('connection', (ws) => {
       // xterm can emit a final input or resize frame while an old PTY is
       // exiting. It is harmless and should not produce a user-facing toast.
       if (message.type === 'tui_input' || message.type === 'tui_resize') {
-        if (!taskId || !isWebTuiRunning(taskId)) return;
-        if (message.type === 'tui_input') return writeWebTui(taskId, clientId, message.data);
-        return resizeWebTui(taskId, message.cols, message.rows);
+        if (!taskId || !sessionId || !isWebTuiRunning(taskId, sessionId)) return;
+        if (message.type === 'tui_input') return writeWebTui(taskId, sessionId, clientId, message.data);
+        return resizeWebTui(taskId, sessionId, message.cols, message.rows);
       }
     } catch (error) {
       const detail = error?.message || String(error);
@@ -421,7 +423,7 @@ webSockets.on('connection', (ws) => {
   });
   ws.on('close', () => {
     unsubscribe?.();
-    if (taskId) releaseWebTuiInput(taskId, clientId);
+    if (taskId && sessionId) releaseWebTuiInput(taskId, sessionId, clientId);
   });
 });
 
