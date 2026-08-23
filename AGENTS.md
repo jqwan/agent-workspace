@@ -18,7 +18,7 @@
 ## 领域规则
 
 - 对外任务状态为 `todo`、`running`、`done`、`archived`，界面显示为待办、处理中、已完成、已废弃。
-- 历史数据中的 `review` 仍需兼容，并通过 `publicTask()` 对外映射为 `running`。
+- 任务状态只允许 `todo`、`running`、`done`、`archived`；历史或未知状态加载时统一归档为 `archived`。
 - 删除任务是软删除：设置 `archived`、`archivedAt` 和 `purgeAt`，15 天后才清理 session 文件和任务记录。
 - 已废弃任务不应出现在全部任务看板中；恢复后回到待办状态。
 - 任务分类字段是 `color`，有效值为 `red`、`orange`、`yellow`、`green`、`cyan`、`blue`、`purple`、`gray`。不要重新引入 priority/重要程度概念。

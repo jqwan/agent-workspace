@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
   ROOT, DATA_DIR, SESSIONS_DIR, CONFIG_FILE,
-  loadTasks, listTasks, getTask, createTask, updateTask, deleteTask,
+  loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask,
 } from './lib/store.js';
 import { parseSessionFile, evaluateRunningTask, extractText } from './lib/session.js';
 import { findPiPids, killPi } from './lib/executor.js';
@@ -50,15 +50,63 @@ function sessionTitleFromPrompt(text) {
   if (!title) return '新会话';
   return title.length > 28 ? `${title.slice(0, 28)}…` : title;
 }
+function messageTime(entry) {
+  const value = entry?.message?.timestamp || entry?.timestamp;
+  const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
+  return Number.isFinite(time) && time > 0 ? time : 0;
+}
+function assistantMessages(child) {
+  return parseSessionFile(child.sessionFile).entries
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => entry.type === 'message' && entry.message?.role === 'assistant');
+}
+function sessionUnread(child) {
+  const messages = assistantMessages(child);
+  if (!messages.length) return { unread: false, unreadCount: 0 };
+  const markerIndex = child.lastReadMessageId ? messages.findIndex(({ entry }) => entry.id === child.lastReadMessageId) : -1;
+  const lastReadAt = Number(child.lastReadAt) || new Date(child.lastReadAt || 0).getTime() || 0;
+  const unreadMessages = markerIndex >= 0
+    ? messages.slice(markerIndex + 1)
+    : messages.filter(({ entry }) => messageTime(entry) > lastReadAt);
+  return { unread: unreadMessages.length > 0, unreadCount: unreadMessages.length };
+}
 function publicSession(child) {
-  if (child.title && child.title !== '主会话' && child.title !== '新会话') return child;
-  const parsed = parseSessionFile(child.sessionFile);
-  for (const entry of parsed.entries) {
-    if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
-    const text = extractText(entry.message.content).trim();
-    if (text) return { ...child, title: sessionTitleFromPrompt(text) };
+  let shown = child;
+  if (!child.title || child.title === '主会话' || child.title === '新会话') {
+    const parsed = parseSessionFile(child.sessionFile);
+    for (const entry of parsed.entries) {
+      if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
+      const text = extractText(entry.message.content).trim();
+      if (text) { shown = { ...child, title: sessionTitleFromPrompt(text) }; break; }
+    }
   }
-  return child;
+  const { lastReadMessageId, lastReadAt, ...safe } = shown;
+  return { ...safe, ...sessionUnread(child) };
+}
+function markSessionRead(task, child) {
+  if (!task || !child) return false;
+  const messages = assistantMessages(child);
+  const latest = messages.at(-1)?.entry || null;
+  const lastReadMessageId = latest?.id || null;
+  const lastReadAt = latest ? (messageTime(latest) || Date.now()) : Date.now();
+  if (child.lastReadMessageId === lastReadMessageId && Number(child.lastReadAt) === lastReadAt) return false;
+  child.lastReadMessageId = lastReadMessageId;
+  child.lastReadAt = lastReadAt;
+  saveTasks();
+  return true;
+}
+function initializeSessionReadState() {
+  let changed = false;
+  for (const task of listTasks()) {
+    for (const child of taskSessions(task)) {
+      if (Object.prototype.hasOwnProperty.call(child, 'lastReadAt')) continue;
+      const latest = assistantMessages(child).at(-1)?.entry || null;
+      child.lastReadMessageId = latest?.id || null;
+      child.lastReadAt = latest ? (messageTime(latest) || Date.now()) : Date.now();
+      changed = true;
+    }
+  }
+  if (changed) saveTasks();
 }
 function persistSessionTitle(task, child) {
   if (!child || (child.title && child.title !== '主会话' && child.title !== '新会话')) return;
@@ -93,7 +141,7 @@ function taskStats(task) {
 }
 function publicTask(task) {
   const internalStatus = task.status;
-  const displayStatus = internalStatus === 'todo' ? 'todo' : internalStatus === 'done' ? 'done' : internalStatus === 'archived' ? 'archived' : 'running';
+  const displayStatus = ['todo', 'running', 'done', 'archived'].includes(internalStatus) ? internalStatus : 'archived';
   const allSessions = taskSessions(task);
   // 「主会话」只存在于历史数据（由旧 task.sessionFile 回填）；没有消息内容时不显示
   const visibleSessions = allSessions.filter((child) => child.id !== 'main' || Boolean(parseSessionFile(child.sessionFile).stats?.messages));
@@ -147,7 +195,8 @@ function withTuiLock(taskId, action) {
 }
 async function openTaskTui(task, childSession, cols, rows, theme) {
   if (!childSession) throw new Error('任务没有可用子会话');
-  if (task.status === 'done' || task.status === 'archived') throw new Error('当前任务状态不能打开原生 TUI');
+  const historical = task.status === 'done';
+  if (task.status === 'archived') throw new Error('当前任务状态不能打开原生 TUI');
   const workingDir = resolveWorkingDir(task.workingDir);
   if (!workingDir) throw new Error('请先为任务设置工作目录');
   mkdirSync(workingDir, { recursive: true });
@@ -163,14 +212,14 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
       const currentSession = resolveTaskSession(current, childSession.id);
       persistSessionTitle(current, currentSession);
       if (current.status !== 'running') return;
-      updateTask(task.id, { status: 'review', lastRun: {
+      updateTask(task.id, { lastRun: {
         status: exitCode === 0 ? 'done' : 'terminated',
         reason: exitCode === 0 ? null : `原生 TUI 已退出（exit code ${exitCode}）`, at: nowIso(),
       }});
     },
   });
   const current = getTask(task.id);
-  if (current?.status !== 'running') updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
+  if (!historical && current?.status !== 'running') updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
   return record;
 }
 
@@ -186,11 +235,11 @@ app.post('/api/tasks', (req, res) => {
 app.put('/api/tasks/:id', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (task.status === 'running') return res.status(409).json({ error: '执行中不能编辑' });
   if (task.status === 'archived') return res.status(409).json({ error: '已废弃任务不能编辑' });
   const patch = {};
   for (const key of ['title', 'description', 'color', 'deadline']) if (key in (req.body || {})) patch[key] = req.body[key];
-  if ('workingDir' in (req.body || {})) {
+  // 处理中和已完成任务允许编辑任务信息，但工作目录必须保持不变。
+  if (!['running', 'done'].includes(task.status) && 'workingDir' in (req.body || {})) {
     patch.workingDir = resolveWorkingDir(req.body.workingDir);
     if (!patch.workingDir) return res.status(400).json({ error: '请选择工作目录' });
   }
@@ -216,13 +265,17 @@ app.delete('/api/tasks/:id', async (req, res) => {
   activeSessionIds.delete(task.id);
   const archivedAt = nowIso();
   const purgeAt = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
-  res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedAt, purgeAt })) });
+  const validStatuses = ['todo', 'running', 'done'];
+  const archivedFromStatus = validStatuses.includes(task.status) ? task.status : (validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'todo');
+  res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedFromStatus, archivedAt, purgeAt })) });
 });
 app.post('/api/tasks/:id/restore', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (task.status !== 'archived') return res.status(409).json({ error: '只有已废弃任务可以恢复' });
-  res.json({ task: publicTask(updateTask(task.id, { status: 'todo', archivedAt: null, purgeAt: null })) });
+  const validStatuses = ['todo', 'running', 'done'];
+  const restoredStatus = validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'todo';
+  res.json({ task: publicTask(updateTask(task.id, { status: restoredStatus, archivedFromStatus: null, archivedAt: null, purgeAt: null })) });
 });
 app.delete('/api/tasks/:id/permanent', async (req, res) => {
   const task = getTask(req.params.id);
@@ -236,7 +289,7 @@ app.delete('/api/tasks/:id/permanent', async (req, res) => {
 app.post('/api/tasks/:id/complete', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (!['todo', 'running', 'review'].includes(task.status)) return res.status(409).json({ error: '当前状态不能标记完成' });
+  if (!['todo', 'running'].includes(task.status)) return res.status(409).json({ error: '当前状态不能标记完成' });
   await stopTaskTui(task.id, { silent: true });
   killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
   res.json({ task: publicTask(updateTask(task.id, { status: 'done', completedAt: nowIso() })) });
@@ -245,14 +298,23 @@ app.post('/api/tasks/:id/reopen', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (task.status !== 'done') return res.status(409).json({ error: '只有已完成任务可以重开' });
-  res.json({ task: publicTask(updateTask(task.id, { status: 'review', completedAt: null, lastRun: { status: 'reopened', reason: '任务已重新打开', at: nowIso() } })) });
+  res.json({ task: publicTask(updateTask(task.id, { status: 'running', completedAt: null, lastRun: { status: 'reopened', reason: '任务已重新打开', at: nowIso() } })) });
 });
 
 // 子会话仅保存 pi JSONL 的入口信息；交互全部在原生 TUI 完成。
+app.post('/api/tasks/:id/sessions/:sessionId/read', (req, res) => {
+  const task = getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  const session = taskSessions(task).find((item) => item.id === req.params.sessionId);
+  if (!session) return res.status(404).json({ error: '子会话不存在' });
+  markSessionRead(task, session);
+  res.json({ ok: true, session: publicSession(session) });
+});
 app.get('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  res.json({ sessions: taskSessions(task), activeSessionId: activeSessionIds.get(task.id) || taskSessions(task)[0]?.id || null });
+  const sessions = taskSessions(task);
+  res.json({ sessions: sessions.map(publicSession), activeSessionId: activeSessionIds.get(task.id) || sessions[0]?.id || null });
 });
 app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
@@ -265,7 +327,7 @@ app.post('/api/tasks/:id/sessions', (req, res) => {
   // 任务级 sessionFile（兼容字段）锚定到首个真实会话
   if (!task.sessionFile) patch.sessionFile = session.sessionFile;
   updateTask(task.id, patch);
-  res.json({ session, task: publicTask(getTask(task.id)) });
+  res.json({ session: publicSession(session), task: publicTask(getTask(task.id)) });
 });
 app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {
   const task = getTask(req.params.id);
@@ -276,7 +338,7 @@ app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {
   if (!title) return res.status(400).json({ error: '会话名称不能为空' });
   session.title = title.slice(0, 80); session.updatedAt = nowIso();
   updateTask(task.id, { sessions: taskSessions(task) });
-  res.json({ session, task: publicTask(getTask(task.id)) });
+  res.json({ session: publicSession(session), task: publicTask(getTask(task.id)) });
 });
 app.delete('/api/tasks/:id/sessions/:sessionId', async (req, res) => {
   const task = getTask(req.params.id);
@@ -306,7 +368,7 @@ app.post('/api/tasks/:id/terminate', async (req, res) => {
   if (task.status !== 'running') return res.status(409).json({ error: '任务不在执行中' });
   const stopped = await stopTaskTui(task.id, { silent: true });
   const killed = killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
-  res.json({ task: publicTask(updateTask(task.id, { status: 'review', lastRun: { status: 'terminated', reason: '已手动终止执行', at: nowIso(), stopped, killed } })) });
+  res.json({ task: publicTask(updateTask(task.id, { lastRun: { status: 'terminated', reason: '已手动终止执行', at: nowIso(), stopped, killed } })) });
 });
 
 const webSockets = new WebSocketServer({ noServer: true });
@@ -320,12 +382,13 @@ webSockets.on('connection', (ws) => {
   const bindTui = async (id, sessionId, cols, rows, theme) => {
     const task = getTask(id);
     if (!task) return send({ type: 'tui_error', error: '任务不存在' });
-    if (task.status === 'done' || task.status === 'archived') return send({ type: 'tui_error', error: '当前任务状态不能打开原生 TUI' });
-    if (task.status !== 'running' && concurrencyFull(1)) return send({ type: 'tui_error', error: `已达到并发上限：${config.maxConcurrent}` });
     const childSession = resolveTaskSession(task, sessionId);
     if (!childSession) return send({ type: 'tui_error', error: '子会话不存在' });
+    if (task.status === 'archived') return send({ type: 'tui_error', error: '当前任务状态不能打开原生 TUI' });
+    if (task.status !== 'running' && concurrencyFull(1)) return send({ type: 'tui_error', error: `已达到并发上限：${config.maxConcurrent}` });
     try {
       await withTuiLock(id, () => openTaskTui(getTask(id), childSession, cols, rows, theme));
+      markSessionRead(getTask(id), childSession);
       if (taskId && taskId !== id) releaseWebTuiInput(taskId, clientId);
       taskId = id;
       unsubscribe?.();
@@ -412,11 +475,12 @@ setInterval(() => {
     persistSessionTitle(task, resolveTaskSession(task));
     if (isWebTuiRunning(task.id)) continue;
     const verdict = evaluateRunningTask(task, { findPiPids });
-    if (verdict) updateTask(task.id, { status: verdict.state, lastRun: verdict.lastRun });
+    if (verdict) updateTask(task.id, { lastRun: verdict.lastRun });
   }
 }, 2000);
 
 loadTasks();
+initializeSessionReadState();
 void purgeArchivedTasks();
 const server = app.listen(config.port, '127.0.0.1', () => console.log(`[workbench] http://127.0.0.1:${config.port}`));
 server.on('upgrade', (request, socket, head) => {

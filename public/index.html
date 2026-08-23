@@ -3,36 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#edf1f2">
   <title>工作台</title>
-  <link rel="stylesheet" href="style.css?v=tui-only-41">
+  <link rel="stylesheet" href="style.css?v=studio-22">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
+  <a class="skip-link" href="#workspace-main">跳转到主要内容</a>
   <header class="topbar">
-    <button id="sidebar-toggle" class="topbar-brand" type="button" title="收起侧边栏" aria-label="收起侧边栏"><span class="brand-mark">π</span><strong>工作台</strong></button>
-    <div class="topbar-tools"><select id="theme-select" aria-label="皮肤模式"><option value="system">跟随系统</option><option value="light">浅色模式</option><option value="dark">深色模式</option></select><div id="stats" class="stats"></div></div>
+    <button id="sidebar-toggle" class="topbar-brand" type="button" title="收起侧边栏" aria-label="收起侧边栏"><span class="brand-mark" aria-hidden="true">π</span><span class="brand-copy"><strong>工作台</strong><small>PI WORKSPACE</small></span></button>
+    <div id="toast-root" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="topbar-tools"><span class="local-status"><i aria-hidden="true"></i>本机运行</span><select id="theme-select" name="theme" aria-label="皮肤模式"><option value="system">跟随系统</option><option value="light">浅色模式</option><option value="dark">深色模式</option></select><div id="stats" class="stats"></div></div>
   </header>
   <div id="workspace-shell">
     <aside id="app-sidebar" class="app-sidebar">
       <div class="sidebar-nav" role="tablist" aria-label="模块切换">
-        <button id="module-tasks" class="sidebar-nav-item active" role="tab"><span>▣</span><span>任务管理</span></button>
-        <button id="module-session" class="sidebar-nav-item" role="tab"><span>◌</span><span>会话管理</span></button>
+        <button id="module-tasks" class="sidebar-nav-item active" type="button" role="tab" aria-label="任务" aria-selected="true" aria-controls="task-list"><span aria-hidden="true">▣</span><span>任务</span></button>
+        <button id="module-session" class="sidebar-nav-item" type="button" role="tab" aria-label="会话" aria-selected="false" aria-controls="session-view"><span aria-hidden="true">◌</span><span>会话</span></button>
       </div>
-      <div id="task-sidebar" class="sidebar-panel"><button id="sidebar-new-task" class="sidebar-action"><span class="group-icon">＋</span><span class="group-label">新建任务</span></button><div id="task-groups" class="task-groups"></div></div>
+      <div id="task-sidebar" class="sidebar-panel"><button id="sidebar-new-task" class="sidebar-action" type="button" aria-label="新建任务"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">新建</span></button><div id="task-groups" class="task-groups"></div></div>
       <div id="session-sidebar" class="sidebar-panel hidden"><div id="session-tree"></div></div>
     </aside>
     <main id="workspace-main">
-      <section class="toolbar" id="task-toolbar"><select id="sort"><option value="updated">最近更新</option><option value="created">创建时间（新→旧）</option><option value="deadline">Deadline（近→远）</option></select><select id="board-group" aria-label="看板分布"><option value="single">单看板</option></select><select id="board-card-layout" aria-label="卡片布局"><option value="single">单列布局</option><option value="compact">紧凑布局</option></select><input id="search" type="search" placeholder="搜索标题或内容"></section>
+      <section class="toolbar" id="task-toolbar"><div class="toolbar-intro"><span class="section-kicker">LOCAL / TASKS</span><h1>任务控制台</h1></div><div class="toolbar-controls"><label class="sr-only" for="sort">排序方式</label><select id="sort" name="sort"><option value="updated">最近更新</option><option value="created">创建时间</option><option value="deadline">截止时间</option></select><label class="sr-only" for="board-group">看板分组方式</label><select id="board-group" name="boardGroup" aria-label="看板分布"><option value="single">全部</option></select><label class="sr-only" for="board-card-layout">卡片布局</label><button id="board-card-layout" class="layout-toggle" type="button" aria-label="切换卡片布局" title="切换卡片布局"><span aria-hidden="true">▯</span></button><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" name="search" type="search" autocomplete="off" aria-label="搜索任务" placeholder="搜索标题或内容…" title="搜索任务（⌘K / Ctrl K）"></label></div></section>
       <section id="task-list" class="module-view"></section>
       <section id="session-view" class="module-view hidden">
         <div class="session-layout"><div class="session-main">
-          <header class="session-header"><div class="session-context"><span class="session-context-icon">π</span><div><button id="session-title" class="session-title-button" type="button">选择一个子会话</button></div><div id="session-description-panel" class="session-description-panel hidden"><div id="session-description-text"></div></div></div><div class="session-controls"><select id="session-task-select"><option value="">选择一个任务会话</option></select><button id="session-restart" title="重新连接当前终端">重新连接</button></div></header>
+          <header class="session-header"><div class="session-context"><span class="session-context-icon" aria-hidden="true">π</span><div><button id="session-title" class="session-title-button" type="button" aria-expanded="false" aria-controls="session-description-panel">选择一个子会话</button></div><div id="session-description-panel" class="session-description-panel hidden"><div id="session-description-text"></div></div></div><div class="session-controls"><label class="sr-only" for="session-task-select">选择任务会话</label><select id="session-task-select" name="sessionTask"><option value="">选择会话</option></select><button id="session-restart" class="icon-button" type="button" title="重新连接" aria-label="重新连接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10V4h6M4 4l4 4a8 8 0 1 1-1 10"/></svg></button></div></header>
           <div id="session-terminal" class="session-terminal" aria-label="pi 终端"><div class="terminal-empty">从左侧选择一个会话以打开 pi 会话</div></div>
         </div></div>
       </section>
     </main>
   </div>
-  <div id="modal-root"></div><div id="toast-root"></div>
-  <script type="module" src="app.js?v=tui-only-52"></script>
+  <div id="modal-root"></div>
+  <script type="module" src="app.js?v=studio-29"></script>
 </body>
 </html>
