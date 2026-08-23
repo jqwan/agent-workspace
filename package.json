@@ -5,7 +5,8 @@
   "type": "module",
   "description": "个人工作台：任务单管理 + pi agent 执行",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.2",

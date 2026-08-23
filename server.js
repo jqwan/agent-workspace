@@ -6,9 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
   ROOT, DATA_DIR, SESSIONS_DIR, CONFIG_FILE,
-  loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask,
+  loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, subscribeTasks,
 } from './lib/store.js';
 import { parseSessionFile, evaluateRunningTask, extractText } from './lib/session.js';
+import { runPatch, finishPatch, shouldStartRun, sessionFileForRun } from './lib/task-service.js';
 import { findPiPids, killPi } from './lib/executor.js';
 import {
   startWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
@@ -28,6 +29,25 @@ function saveConfig() {
 }
 
 const app = express();
+const taskEventClients = new Set();
+const taskEventTimers = new Map();
+function broadcastTaskEvent(event = {}) {
+  const payload = `data: ${JSON.stringify({ type: 'tasks_changed', ...event })}\n\n`;
+  for (const client of taskEventClients) {
+    try { client.write(payload); } catch { taskEventClients.delete(client); }
+  }
+}
+function notifyTaskChanged(taskId, reason = 'task') {
+  const key = taskId || '*';
+  if (taskEventTimers.has(key)) return;
+  const timer = setTimeout(() => {
+    taskEventTimers.delete(key);
+    broadcastTaskEvent({ taskId: taskId || null, reason });
+  }, 200);
+  taskEventTimers.set(key, timer);
+  timer.unref?.();
+}
+subscribeTasks(({ taskId }) => notifyTaskChanged(taskId));
 app.use(express.json({ limit: '2mb' }));
 app.use('/vendor/xterm', express.static(path.join(ROOT, 'node_modules', '@xterm', 'xterm')));
 app.use('/vendor/xterm-fit', express.static(path.join(ROOT, 'node_modules', '@xterm', 'addon-fit', 'lib')));
@@ -206,25 +226,42 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
     title: childSession.title || task.title, provider: task.modelProvider, model: task.model,
     thinkingLevel: task.thinkingLevel, readOnly: task.readOnly, approve: config.approvePi !== false,
     cols, rows, theme: theme === 'dark' ? 'dark' : 'light',
+    onData: () => notifyTaskChanged(task.id, 'session'),
     onExit: ({ exitCode }) => {
       const current = getTask(task.id);
       if (!current) return;
       const currentSession = resolveTaskSession(current, childSession.id);
       persistSessionTitle(current, currentSession);
       if (current.status !== 'running' || isWebTuiRunning(task.id)) return;
-      updateTask(task.id, { lastRun: {
-        status: exitCode === 0 ? 'done' : 'terminated',
-        reason: exitCode === 0 ? null : `原生 TUI 已退出（exit code ${exitCode}）`, at: nowIso(),
-      }});
+      updateTask(task.id, { lastRun: finishPatch(childSession, exitCode) });
     },
   });
   const current = getTask(task.id);
-  if (!historical && current?.status !== 'running') updateTask(task.id, { status: 'running', lastRun: { status: 'running', reason: null, at: nowIso() } });
+  if (!historical && current && shouldStartRun(current, childSession)) {
+    updateTask(task.id, { status: 'running', lastRun: runPatch(childSession) });
+  }
   return record;
 }
 
 // 任务 CRUD
 app.get('/api/tasks', (_req, res) => res.json({ tasks: listTasks().map(publicTask) }));
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+  });
+  res.write(': connected\n\n');
+  taskEventClients.add(res);
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch { /* closed response */ }
+  }, 25000);
+  heartbeat.unref?.();
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    taskEventClients.delete(res);
+  });
+});
 app.post('/api/tasks', (req, res) => {
   const body = req.body || {};
   if (!String(body.title || '').trim()) return res.status(400).json({ error: '标题不能为空' });
@@ -474,9 +511,10 @@ setInterval(() => { void purgeArchivedTasks(); }, 60 * 60 * 1000);
 setInterval(() => {
   for (const task of listTasks()) {
     if (task.status !== 'running') continue;
-    persistSessionTitle(task, resolveTaskSession(task));
+    const runSession = resolveTaskSession(task, task.lastRun?.sessionId);
+    persistSessionTitle(task, runSession);
     if (isWebTuiRunning(task.id)) continue;
-    const verdict = evaluateRunningTask(task, { findPiPids });
+    const verdict = evaluateRunningTask(task, { findPiPids, sessionFile: sessionFileForRun(task, runSession) });
     if (verdict) updateTask(task.id, { lastRun: verdict.lastRun });
   }
 }, 2000);
@@ -506,6 +544,10 @@ async function shutdown() {
   for (const client of webSockets.clients) {
     try { client.close(); } catch { /* already closed */ }
   }
+  for (const client of taskEventClients) {
+    try { client.end(); } catch { /* already closed */ }
+  }
+  taskEventClients.clear();
   await stopAllWebTuis();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

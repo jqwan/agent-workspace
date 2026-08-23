@@ -443,15 +443,20 @@ async function openNativeTui() {
   })().finally(() => { tuiOpening = null; });
   return tuiOpening;
 }
-async function restartTuiForTheme() {
+async function restartCurrentTui(message = '正在重启会话…') {
   const taskId = state.sessionTask;
-  if (!taskId || !tuiSocket) return;
-  toast('主题已切换，正在重启会话…');
+  if (!taskId) return;
+  toast(message);
+  detachTui();
   try {
     await api(`/tasks/${taskId}/tui/restart`, { method: 'POST' });
   } catch { /* the process may already have exited */ }
   await refresh();
   if (state.sessionTask === taskId) await openNativeTui();
+}
+async function restartTuiForTheme() {
+  if (!state.sessionTask || !tuiSocket) return;
+  await restartCurrentTui('主题已切换，正在重启会话…');
 }
 function selectSession(taskId, sessionId = 'main') {
   detachTui();
@@ -780,7 +785,7 @@ document.addEventListener('click', (event) => {
     saveLayoutState();
   }
 });
-$('#session-restart').onclick = () => { detachTui(); void openNativeTui(); };
+$('#session-restart').onclick = () => { void restartCurrentTui(); };
 $('#session-tree').onclick = (event) => {
   const create = event.target.closest('[data-new-session-task]');
   if (create) { const task = currentTask(create.dataset.newSessionTask); if (task) void createChildSession(task); return; }

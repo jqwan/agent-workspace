@@ -35,8 +35,10 @@ npm start
 
 - `server.js`：Express API、WebSocket 与任务生命周期
 - `lib/tui-executor.js`：pi PTY、输入所有权、尺寸、输出与关闭等待
-- `lib/store.js`：任务持久化
-- `lib/session.js`：session JSONL 解析和统计
+- `lib/task-service.js`：任务运行状态和子会话运行规则
+- `lib/store.js`：任务持久化和任务变更事件
+- `lib/session.js`：session JSONL 解析、缓存和统计
+- `public/ui/`：前端 API、状态和格式化模块
 - `public/`：原生 JavaScript、HTML、CSS 与 xterm 页面
 
 ## 配置
@@ -77,6 +79,7 @@ npm start
 node --check server.js
 node --check lib/tui-executor.js
 node --check public/app.js
+npm test
 ```
 
 pi 可读取文件、执行命令和修改工作目录中的文件。仅对可信项目使用，且不要将服务暴露到公网。
