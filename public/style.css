@@ -358,10 +358,11 @@ h1, h2, h3 { text-wrap: balance; }
 .card.archived { border-left: 3px dashed #9aabb0; opacity: .8; }
 .task-board .card { margin: 0 0 11px; padding: 0 13px 13px; }
 .card-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 -18px; padding: 12px 18px 5px; border-radius: 7px 7px 0 0; }
-.card-heading { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.card-heading { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.card-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-heading .task-folder { max-width: 100%; }
 .task-board .card-head { margin: 0 -13px; padding: 10px 13px 5px; }
-.card-title { margin: 0; overflow: hidden; font-size: 16px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
+.card-title { min-width: 0; flex: 1; margin: 0; overflow: hidden; font-size: 16px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
 .task-folder { display: inline-flex; align-items: center; gap: 4px; max-width: 42%; overflow: hidden; color: var(--muted); font: 11px "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .task-folder svg, .deadline svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

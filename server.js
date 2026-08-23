@@ -319,7 +319,7 @@ app.get('/api/tasks/:id/sessions', (req, res) => {
 app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (task.status === 'done' || task.status === 'archived') return res.status(409).json({ error: '当前任务状态不能新建会话' });
+  if (task.status === 'archived') return res.status(409).json({ error: '当前任务状态不能新建会话' });
   const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);

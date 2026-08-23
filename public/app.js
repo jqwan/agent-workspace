@@ -284,8 +284,8 @@ function card(task, compact = false) {
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
   const unread = taskUnreadCount(task);
-  const unreadBadge = unread ? `<span class="card-unread" title="${unread}条未读消息" aria-label="${unread}条未读消息">未读 ${number(unread)}</span>` : '';
-  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3>${folder}</div><span class="spacer"></span>${unreadBadge}${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+  const unreadBadge = unread ? `<span class="card-unread" title="${unread}条未读消息" aria-label="${unread}条未读消息">${number(unread)}</span>` : '';
+  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${unreadBadge}${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
 }
 function syncBoardGroupOptions() {
   const options = [{ value: 'single', label: '全部' }];
@@ -910,10 +910,16 @@ $('#task-list').onclick = async (event) => {
       await openExecute(task);
     }
     else if (button.dataset.action === 'session') {
-      if (!availableSessions(task).length) { toast('该任务没有历史会话', 'error'); return; }
       state.hiddenCompletedSessionTasks.delete(task.id);
-      saveLayoutState();
-      switchModule('session'); selectSession(task.id, task.activeSessionId || 'main');
+      if (!availableSessions(task).length) {
+        const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
+        await refresh();
+        switchModule('session'); selectSession(task.id, result.session.id);
+        toast('已新建会话。');
+      } else {
+        saveLayoutState();
+        switchModule('session'); selectSession(task.id, task.activeSessionId || 'main');
+      }
     }
     else if (button.dataset.action === 'edit') openTaskForm(task);
     else if (button.dataset.action === 'delete') openDeleteTaskModal(task);
