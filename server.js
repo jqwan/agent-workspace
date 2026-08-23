@@ -380,10 +380,10 @@ webSockets.on('connection', (ws) => {
   const send = (message) => {
     if (ws.readyState === 1) ws.send(JSON.stringify(message));
   };
-  const bindTui = async (id, sessionId, cols, rows, theme) => {
+  const bindTui = async (id, requestedSessionId, cols, rows, theme) => {
     const task = getTask(id);
     if (!task) return send({ type: 'tui_error', error: '任务不存在' });
-    const childSession = resolveTaskSession(task, sessionId);
+    const childSession = resolveTaskSession(task, requestedSessionId);
     if (!childSession) return send({ type: 'tui_error', error: '子会话不存在' });
     if (task.status === 'archived') return send({ type: 'tui_error', error: '当前任务状态不能打开原生 TUI' });
     if (task.status !== 'running' && concurrencyFull(1)) return send({ type: 'tui_error', error: `已达到并发上限：${config.maxConcurrent}` });

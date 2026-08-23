@@ -9,6 +9,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
   hour12: false,
 });
+const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 const numberFormatter = new Intl.NumberFormat('zh-CN');
 const costFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 4, maximumFractionDigits: 4 });
 
@@ -18,7 +23,8 @@ export function time(value) {
 }
 
 export function deadline(value) {
-  return time(value);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : dateFormatter.format(date);
 }
 
 export function number(value) {
