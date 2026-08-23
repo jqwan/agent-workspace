@@ -58,14 +58,55 @@ function forgetWorkingDir(value) {
   localStorage.setItem('workbench-working-dirs', JSON.stringify(saved.filter((item) => item !== dir)));
   localStorage.setItem('workbench-hidden-working-dirs', JSON.stringify([dir, ...hiddenWorkingDirs().filter((item) => item !== dir)].slice(0, 50)));
 }
+function syncThemeMenu() {
+  const style = localStorage.getItem('workbench-style') || 'classic';
+  document.querySelectorAll('[data-theme-style]').forEach((button) => {
+    const active = button.dataset.themeStyle === style;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  });
+}
+const THEME_STYLES = ['classic', 'geek-terminal', 'pixel-arcade', 'blueprint', 'aurora', 'newspaper', 'dopamine'];
+const THEME_CLASS_NAMES = { classic: 'classic', 'geek-terminal': 'geek', 'pixel-arcade': 'pixel-arcade', blueprint: 'blueprint', aurora: 'aurora', newspaper: 'newspaper', dopamine: 'dopamine' };
+const THEME_BODY_CLASSES = ['classic', 'geek', 'geek-terminal', 'pixel-arcade', 'blueprint', 'aurora', 'newspaper', 'dopamine'];
+function applyThemeStyle(style) {
+  const normalized = style === 'geek' ? 'geek-terminal' : style;
+  const selected = THEME_STYLES.includes(normalized) ? normalized : 'classic';
+  THEME_BODY_CLASSES.forEach((name) => document.body.classList.toggle(`theme-${name}`, THEME_CLASS_NAMES[selected] === name));
+  localStorage.setItem('workbench-style', selected);
+  syncThemeMenu();
+}
 function applyTheme(theme) {
   const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.body.classList.toggle('theme-light', theme === 'light');
   document.body.classList.toggle('theme-dark', theme === 'dark');
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0e191f' : '#edf1f2');
+  const style = THEME_STYLES.includes(localStorage.getItem('workbench-style')) ? localStorage.getItem('workbench-style') : 'classic';
+  const themeColors = {
+    classic: { light: '#edf1f2', dark: '#0e191f' },
+    'geek-terminal': { light: '#f4f7f5', dark: '#0f1412' },
+    'pixel-arcade': { light: '#f7f1de', dark: '#101528' },
+    blueprint: { light: '#e7f1f7', dark: '#0b1e2d' },
+    aurora: { light: '#f1f2ff', dark: '#0e1020' },
+    newspaper: { light: '#f3ead7', dark: '#171717' },
+    dopamine: { light: '#fff4fb', dark: '#17132a' },
+  };
+  const themeColor = themeColors[style][dark ? 'dark' : 'light'];
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
   localStorage.setItem('workbench-theme', theme);
-  $('#theme-select').value = theme;
+  const modeToggle = $('#mode-toggle');
+  if (modeToggle) {
+    const modeLabel = theme === 'system' ? '跟随系统' : theme === 'light' ? '亮色模式' : '暗色模式';
+    const modeIcon = theme === 'system'
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>'
+      : theme === 'light'
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 14.5A7 7 0 0 1 9.5 5 7.5 7.5 0 1 0 19 14.5Z"/></svg>';
+    modeToggle.innerHTML = modeIcon;
+    modeToggle.title = `显示模式：${modeLabel}，点击切换`;
+    modeToggle.setAttribute('aria-label', `显示模式：${modeLabel}，点击切换`);
+  }
+  syncThemeMenu();
 }
 function isTerminalDark() {
   return document.body.classList.contains('theme-dark') || (!document.body.classList.contains('theme-light') && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -73,6 +114,7 @@ function isTerminalDark() {
 function syncViewportHeight() {
   document.documentElement.style.setProperty('--app-viewport-height', `${window.visualViewport?.height || window.innerHeight}px`);
 }
+applyThemeStyle(localStorage.getItem('workbench-style'));
 applyTheme(['system', 'light', 'dark'].includes(localStorage.getItem('workbench-theme')) ? localStorage.getItem('workbench-theme') : 'system');
 syncViewportHeight();
 function applySidebarCollapsed(collapsed) {
@@ -318,6 +360,11 @@ async function refresh() {
 }
 
 function terminalTheme() {
+  if (document.body.classList.contains('theme-geek')) {
+    return isTerminalDark()
+      ? { background: '#0f1412', foreground: '#e5f3ea', cursor: '#4ade80', selectionBackground: '#254b35', black: '#17221d', red: '#fb7185', green: '#4ade80', yellow: '#facc15', blue: '#7dd3fc', magenta: '#c4b5fd', cyan: '#5eead4', white: '#e5f3ea', brightBlack: '#8da69a' }
+      : { background: '#f8fbf9', foreground: '#17251f', cursor: '#166534', selectionBackground: '#bbf7d0', black: '#17251f', red: '#b42318', green: '#166534', yellow: '#8a5a00', blue: '#075985', magenta: '#6b21a8', cyan: '#0f766e', white: '#f8fbf9', brightBlack: '#587066' };
+  }
   return isTerminalDark()
     ? { background: '#0b1220', foreground: '#e5e7eb', cursor: '#93c5fd', selectionBackground: '#1e3a5f', black: '#334155', red: '#f87171', green: '#4ade80', yellow: '#facc15', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e5e7eb', brightBlack: '#94a3b8' }
     : { background: '#f8fafc', foreground: '#172033', cursor: '#2563eb', selectionBackground: '#bfdbfe', black: '#172033', red: '#dc2626', green: '#15803d', yellow: '#a16207', blue: '#2563eb', magenta: '#7c3aed', cyan: '#0f766e', white: '#f8fafc', brightBlack: '#64748b' };
@@ -368,7 +415,7 @@ async function openNativeTui() {
     try {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs')]);
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
-      terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: 'Consolas, "Cascadia Mono", "SFMono-Regular", monospace', theme: terminalTheme() });
+      terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: document.body.classList.contains('theme-geek') ? '"JetBrains Mono", "SFMono-Regular", Consolas, monospace' : 'Consolas, "Cascadia Mono", "SFMono-Regular", monospace', theme: terminalTheme() });
       terminal.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
         const key = event.key.toLowerCase();
@@ -509,7 +556,8 @@ function setFieldError(form, inputId, message = '') {
   error.textContent = message;
   error.classList.toggle('hidden', !message);
 }
-function openTaskForm(task = null) {
+function openTaskForm(task = null, options = {}) {
+  const openSessionAfterCreate = Boolean(options.openSessionAfterCreate && !task);
   const workingDirEditable = !task || !['running', 'done'].includes(task.status);
   const workingDirHint = workingDirEditable ? '' : '（处理中或已完成不可修改）';
   const workingDirReadonly = workingDirEditable ? '' : ' disabled';
@@ -641,8 +689,14 @@ function openTaskForm(task = null) {
       if (workingDirEditable) rememberWorkingDir(workingDir);
       const body = { title, description: $('#task-desc', form).value, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null };
       if (workingDirEditable) body.workingDir = workingDir;
-      await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body });
-      closeModal(); toast(task ? '任务已保存' : '任务已创建'); refresh();
+      const result = await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body });
+      closeModal();
+      if (!task && openSessionAfterCreate && result.task) {
+        await openExecute(result.task);
+        return;
+      }
+      toast(task ? '任务已保存' : '任务已创建');
+      refresh();
     } catch (error) { button.disabled = false; button.textContent = task ? '保存' : '创建'; toast(error.message, 'error'); }
   };
 }
@@ -738,7 +792,40 @@ function switchModule(module) {
   else renderList();
 }
 
-$('#theme-select').onchange = (event) => { applyTheme(event.target.value); void restartTuiForTheme(); event.target.blur(); };
+function closeThemeMenu() {
+  const menu = $('#theme-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  menu.classList.add('hidden');
+  $('#style-toggle').setAttribute('aria-expanded', 'false');
+}
+function toggleThemeMenu(focusSelector) {
+  const menu = $('#theme-menu');
+  const open = menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !open);
+  $('#style-toggle').setAttribute('aria-expanded', String(open));
+  if (open) menu.querySelector(focusSelector)?.focus();
+}
+$('#style-toggle').onclick = () => toggleThemeMenu('[data-theme-style][aria-checked="true"]');
+$('#mode-toggle').onclick = () => {
+  const modes = ['system', 'light', 'dark'];
+  const current = modes.includes(localStorage.getItem('workbench-theme')) ? localStorage.getItem('workbench-theme') : 'system';
+  applyTheme(modes[(modes.indexOf(current) + 1) % modes.length]);
+  void restartTuiForTheme();
+  closeThemeMenu();
+};
+$('#theme-menu').onclick = (event) => {
+  const style = event.target.closest('[data-theme-style]');
+  if (!style) return;
+  applyThemeStyle(style.dataset.themeStyle);
+  void restartTuiForTheme();
+  closeThemeMenu();
+};
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('#style-toggle, #mode-toggle, #theme-menu')) closeThemeMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeThemeMenu();
+});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (localStorage.getItem('workbench-theme') === 'system') { applyTheme('system'); void restartTuiForTheme(); } });
 $('#module-tasks').onclick = () => switchModule('tasks');
 $('#module-session').onclick = () => switchModule('session');
@@ -763,6 +850,7 @@ $('#sidebar-toggle').onclick = () => {
   saveLayoutState();
 };
 $('#sidebar-new-task').onclick = () => openTaskForm();
+$('#session-sidebar-new-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
 $('#session-title').onclick = () => {
   if (!currentTask(state.sessionTask)) return;
