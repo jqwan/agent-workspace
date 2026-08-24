@@ -14,7 +14,6 @@ function customColorStyle(key) {
 
 loadLayoutState();
 let layoutInitialized = false;
-const unreadPollingSessions = new Set();
 let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
@@ -56,9 +55,9 @@ function syncThemeMenu() {
     button.setAttribute('aria-checked', String(active));
   });
 }
-const THEME_STYLES = ['classic', 'geek-terminal', 'pixel-arcade', 'blueprint', 'aurora', 'newspaper', 'dopamine'];
-const THEME_CLASS_NAMES = { classic: 'classic', 'geek-terminal': 'geek', 'pixel-arcade': 'pixel-arcade', blueprint: 'blueprint', aurora: 'aurora', newspaper: 'newspaper', dopamine: 'dopamine' };
-const THEME_BODY_CLASSES = ['classic', 'geek', 'geek-terminal', 'pixel-arcade', 'blueprint', 'aurora', 'newspaper', 'dopamine'];
+const THEME_STYLES = ['classic', 'geek-terminal', 'pixel-arcade', 'newspaper', 'music'];
+const THEME_CLASS_NAMES = { classic: 'classic', 'geek-terminal': 'geek', 'pixel-arcade': 'pixel-arcade', newspaper: 'newspaper', music: 'music' };
+const THEME_BODY_CLASSES = ['classic', 'geek', 'geek-terminal', 'pixel-arcade', 'newspaper', 'music'];
 function applyThemeStyle(style) {
   const normalized = style === 'geek' ? 'geek-terminal' : style;
   const selected = THEME_STYLES.includes(normalized) ? normalized : 'classic';
@@ -76,10 +75,8 @@ function applyTheme(theme) {
     classic: { light: '#edf1f2', dark: '#0e191f' },
     'geek-terminal': { light: '#f4f7f5', dark: '#0f1412' },
     'pixel-arcade': { light: '#f7f1de', dark: '#101528' },
-    blueprint: { light: '#e7f1f7', dark: '#0b1e2d' },
-    aurora: { light: '#f1f2ff', dark: '#0e1020' },
-    newspaper: { light: '#f3ead7', dark: '#171717' },
-    dopamine: { light: '#fff4fb', dark: '#17132a' },
+    newspaper: { light: '#f4f4f0', dark: '#1c1b19' },
+    music: { light: '#eef3fb', dark: '#111a2d' },
   };
   const themeColor = themeColors[style][dark ? 'dark' : 'light'];
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
@@ -284,7 +281,7 @@ function availableSessions(task) {
   return Array.isArray(task?.sessions) ? task.sessions : [];
 }
 function sessionTasks() {
-  return state.tasks.filter((task) => ['todo', 'running', 'done'].includes(task.status) && availableSessions(task).length > 0 && !(task.status === 'done' && state.hiddenCompletedSessionTasks.has(task.id)));
+  return state.tasks.filter((task) => ['todo', 'running', 'done'].includes(task.status) && availableSessions(task).length > 0 && !state.hiddenCompletedSessionTasks.has(task.id));
 }
 function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
@@ -309,7 +306,7 @@ function renderSessionTree() {
     const colorKey = taskColor(task);
     const customClass = customColors[colorKey] ? ' custom-color' : '';
     const taskAction = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
-    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot" aria-hidden="true">●</span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread-count">${unreadLabel}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
+    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread-count">${unreadLabel}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
   }).join('') : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
 }
 async function refresh() {
@@ -317,11 +314,6 @@ async function refresh() {
     const data = await api('/tasks');
     const signature = JSON.stringify(data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.stats?.messages, task.stats?.totalTokens]));
     state.tasks = data.tasks;
-    for (const key of unreadPollingSessions) {
-      const [taskId, sessionId] = key.split(':');
-      const session = state.tasks.find((task) => task.id === taskId)?.sessions?.find((item) => item.id === sessionId);
-      if (!session?.running) unreadPollingSessions.delete(key);
-    }
     if (state.sessionTask && !sessionTasks().some((task) => task.id === state.sessionTask)) {
       detachTui();
       state.sessionTask = null;
@@ -348,15 +340,60 @@ async function refresh() {
   } catch (error) { toast(error.message, 'error'); }
 }
 
+function terminalFontFamily() {
+  if (document.body.classList.contains('theme-geek')) return '"JetBrains Mono", "DengXian", "等线", "Microsoft YaHei UI", monospace';
+  if (document.body.classList.contains('theme-pixel-arcade')) return '"Courier New", "Cascadia Mono", "FangSong", "仿宋", monospace';
+  if (document.body.classList.contains('theme-newspaper')) return '"Courier New", "KaiTi", "楷体", "Courier Prime", monospace';
+  if (document.body.classList.contains('theme-music')) return '"Cascadia Mono", "JetBrains Mono", "Microsoft YaHei UI", monospace';
+  return 'Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace';
+}
 function terminalTheme() {
-  if (document.body.classList.contains('theme-geek')) {
-    return isTerminalDark()
-      ? { background: '#0f1412', foreground: '#e5f3ea', cursor: '#4ade80', selectionBackground: '#254b35', black: '#17221d', red: '#fb7185', green: '#4ade80', yellow: '#facc15', blue: '#7dd3fc', magenta: '#c4b5fd', cyan: '#5eead4', white: '#e5f3ea', brightBlack: '#8da69a' }
-      : { background: '#f8fbf9', foreground: '#17251f', cursor: '#166534', selectionBackground: '#bbf7d0', black: '#17251f', red: '#b42318', green: '#166534', yellow: '#8a5a00', blue: '#075985', magenta: '#6b21a8', cyan: '#0f766e', white: '#f8fbf9', brightBlack: '#587066' };
-  }
-  return isTerminalDark()
-    ? { background: '#0b1220', foreground: '#e5e7eb', cursor: '#93c5fd', selectionBackground: '#1e3a5f', black: '#334155', red: '#f87171', green: '#4ade80', yellow: '#facc15', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e5e7eb', brightBlack: '#94a3b8' }
-    : { background: '#f8fafc', foreground: '#172033', cursor: '#2563eb', selectionBackground: '#bfdbfe', black: '#172033', red: '#dc2626', green: '#15803d', yellow: '#a16207', blue: '#2563eb', magenta: '#7c3aed', cyan: '#0f766e', white: '#f8fafc', brightBlack: '#64748b' };
+  const styles = getComputedStyle(document.body);
+  const background = styles.getPropertyValue('--bg').trim();
+  const foreground = styles.getPropertyValue('--ink').trim();
+  const muted = styles.getPropertyValue('--muted').trim();
+  const accent = styles.getPropertyValue('--accent').trim();
+  const selectionBackground = styles.getPropertyValue('--accent-soft').trim();
+  const dark = isTerminalDark();
+  const theme = document.body.classList.contains('theme-geek')
+    ? 'geek'
+    : document.body.classList.contains('theme-pixel-arcade')
+      ? 'pixel-arcade'
+      : document.body.classList.contains('theme-newspaper')
+        ? 'newspaper'
+        : document.body.classList.contains('theme-music')
+          ? 'music'
+          : 'classic';
+  const palettes = {
+    classic: {
+      light: { black: '#172b36', red: '#c84822', green: '#2f855a', yellow: '#a16207', blue: '#075985', magenta: '#7c3aed', cyan: '#078c86', white: '#fbfcfa' },
+      dark: { black: '#10252d', red: '#ff8b72', green: '#7fd69b', yellow: '#f6c85f', blue: '#8cc8ff', magenta: '#d4a5ff', cyan: '#67d8d1', white: '#e6f0ed' },
+    },
+    geek: {
+      light: { black: '#17251f', red: '#b42318', green: '#166534', yellow: '#8a5a00', blue: '#075985', magenta: '#6b21a8', cyan: '#0f766e', white: '#fbfdfb' },
+      dark: { black: '#0b120e', red: '#fb7185', green: '#4ade80', yellow: '#facc15', blue: '#7dd3fc', magenta: '#c4b5fd', cyan: '#5eead4', white: '#e5f3ea' },
+    },
+    'pixel-arcade': {
+      light: { black: '#19233a', red: '#d9365e', green: '#3e8f48', yellow: '#b7791f', blue: '#315bb5', magenta: '#8b4cc7', cyan: '#147f8c', white: '#fffdf4' },
+      dark: { black: '#101528', red: '#ff6b8a', green: '#7bdc7d', yellow: '#f6d365', blue: '#7aa2f7', magenta: '#d19aff', cyan: '#56d8d5', white: '#f4f1df' },
+    },
+    newspaper: {
+      light: { black: '#28231d', red: '#a3332f', green: '#39704b', yellow: '#936b12', blue: '#385d82', magenta: '#78506f', cyan: '#3e6d68', white: '#fffaf0' },
+      dark: { black: '#171717', red: '#e27b6d', green: '#8fca91', yellow: '#dfc477', blue: '#92b8d5', magenta: '#c69abb', cyan: '#79b8ad', white: '#f3ead8' },
+    },
+    music: {
+      light: { black: '#17243a', red: '#3a74c5', green: '#3f805d', yellow: '#9b6b18', blue: '#24549c', magenta: '#5f6fbd', cyan: '#287f86', white: '#ffffff' },
+      dark: { black: '#111a2d', red: '#66a5ff', green: '#9bdfa9', yellow: '#f2c66d', blue: '#8bbcff', magenta: '#b7a1ff', cyan: '#61d3d5', white: '#edf4ff' },
+    },
+  };
+  return {
+    background,
+    foreground,
+    cursor: accent,
+    selectionBackground,
+    ...palettes[theme][dark ? 'dark' : 'light'],
+    brightBlack: muted,
+  };
 }
 function disposeTerminal() {
   terminalResizeObserver?.disconnect(); terminalResizeObserver = null;
@@ -404,7 +441,7 @@ async function openNativeTui() {
     try {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs')]);
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
-      terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: document.body.classList.contains('theme-geek') ? '"JetBrains Mono", "SFMono-Regular", Consolas, monospace' : 'Consolas, "Cascadia Mono", "SFMono-Regular", monospace', theme: terminalTheme() });
+      terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: terminalFontFamily(), theme: terminalTheme() });
       const browserPlatform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
       const isWindowsBrowser = /^win/i.test(browserPlatform);
       terminal.attachCustomKeyEventHandler((event) => {
@@ -511,12 +548,13 @@ function selectSession(taskId, sessionId = 'main') {
   state.sessionTask = taskId || null;
   // 新建任务没有「主会话」；传入的 id 不存在时回退到服务端活跃会话或首个会话
   state.sessionSessionId = nextSessionId;
-  unreadPollingSessions.delete(`${taskId}:${nextSessionId}`);
   renderSessionHeader();
   document.querySelectorAll('#session-tree .session-child-session').forEach((item) => {
     const active = item.dataset.sessionTask === state.sessionTask && item.dataset.sessionId === state.sessionSessionId;
     item.classList.toggle('active', active);
-    if (active) item.querySelector('.session-unread-count')?.remove();
+    if (active) {
+      item.querySelector('.session-unread-count')?.remove();
+    }
   });
   saveLayoutState();
   if (taskId) {
@@ -774,7 +812,6 @@ function openDeleteSessionModal(task, sessionId) {
 function leaveCurrentSession() {
   if (!state.sessionTask || !state.sessionSessionId) return;
   const session = currentTask(state.sessionTask)?.sessions?.find((item) => item.id === state.sessionSessionId);
-  if (tuiSocket || session?.running) unreadPollingSessions.add(`${state.sessionTask}:${state.sessionSessionId}`);
   markSessionRead(state.sessionTask, state.sessionSessionId);
 }
 function markSessionRead(taskId, sessionId) {
@@ -970,7 +1007,14 @@ $('#task-list').onclick = async (event) => {
     else if (button.dataset.action === 'purge-archived') openClearArchivedModal();
     else if (button.dataset.action === 'complete') {
       await api(`/tasks/${task.id}/complete`, { method: 'POST' });
+      state.hiddenCompletedSessionTasks.add(task.id);
+      if (state.sessionTask === task.id) {
+        detachTui();
+        state.sessionTask = null;
+        state.sessionSessionId = 'main';
+      }
       await refresh();
+      saveLayoutState();
       toast('任务已完成');
     }
     else if (button.dataset.action === 'reopen') { await api(`/tasks/${task.id}/reopen`, { method: 'POST' }); toast('任务已重开'); refresh(); }
@@ -987,7 +1031,7 @@ const taskEvents = new EventSource('/api/events');
 taskEvents.onmessage = ({ data }) => {
   try {
     const event = JSON.parse(data);
-    if (event.type === 'tasks_changed' && (event.reason !== 'session' || unreadPollingSessions.size > 0)) scheduleRefresh();
+    if (event.type === 'tasks_changed' && event.reason !== 'session') scheduleRefresh();
   } catch { /* ignore malformed event */ }
 };
 window.addEventListener('pagehide', () => {
@@ -995,5 +1039,4 @@ window.addEventListener('pagehide', () => {
   taskEvents.close();
 }, { once: true });
 refresh();
-// SSE 是实时更新路径；定时轮询用于补偿 session 文件写入没有触发事件的情况。
-setInterval(() => { if (unreadPollingSessions.size > 0) void refresh(); }, 3000);
+// SSE 是实时更新路径；不再对任务列表进行定时轮询，避免无必要地重绘任务卡片。
