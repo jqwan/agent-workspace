@@ -14,6 +14,10 @@
   --accent-strong: #c84822;
   --accent-soft: #fff0e9;
   --teal: #078c86;
+  --status-todo: #a16207;
+  --status-running: #087f8c;
+  --status-done: #2f855a;
+  --status-archived: #7b8a8d;
   --terminal: #f5f8f7;
   --shadow: 0 12px 30px rgba(25, 51, 61, .07);
   --wash-red: #fff1ef;
@@ -191,11 +195,11 @@ h1, h2, h3 { text-wrap: balance; }
   font-weight: 700;
   white-space: nowrap;
 }
-.chip.todo, .badge.todo { background: var(--surface-muted); color: var(--muted); }
-.chip.running, .badge.running { background: #d9f0ee; color: #08726e; }
-.chip.done, .badge.done { background: #dcefe2; color: #237043; }
-.chip.overdue { background: #ffe2d9; color: #b53d20; }
-.badge.archived { background: var(--surface-muted); color: var(--muted); }
+.chip.todo, .badge.todo { background: color-mix(in srgb, var(--status-todo) 16%, var(--surface)); color: var(--status-todo); }
+.chip.running, .badge.running { background: color-mix(in srgb, var(--status-running) 16%, var(--surface)); color: var(--status-running); }
+.chip.done, .badge.done { background: color-mix(in srgb, var(--status-done) 16%, var(--surface)); color: var(--status-done); }
+.chip.overdue { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+.badge.archived { background: color-mix(in srgb, var(--status-archived) 16%, var(--surface)); color: var(--status-archived); }
 
 #workspace-shell { display: flex; min-height: calc(100vh - 68px); }
 #app-sidebar {
@@ -451,17 +455,14 @@ h1, h2, h3 { text-wrap: balance; }
   margin: 12px 0;
   padding: 0 18px 17px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--line-strong);
+  border-left: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-raised);
   box-shadow: 0 3px 12px rgba(25, 51, 61, .05);
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .card:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: 0 10px 24px rgba(25, 51, 61, .1); }
-.card.todo { border-left-color: #9aabb0; }
-.card.running { border-left-color: var(--teal); }
-.card.done { border-left-color: #3b9660; }
-.card.archived { border-left: 3px dashed #9aabb0; opacity: .8; }
+.card.archived { border-left: 1px dashed var(--line); opacity: .8; }
 .task-board .card { margin: 0 0 11px; padding: 0 13px 13px; }
 .card-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 -18px; padding: 12px 18px 5px; border-radius: 7px 7px 0 0; }
 .card-heading { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
@@ -469,11 +470,15 @@ h1, h2, h3 { text-wrap: balance; }
 .card-heading .task-folder { max-width: 100%; }
 .task-board .card-head { margin: 0 -13px; padding: 10px 13px 5px; }
 .card-title { min-width: 0; flex: 1; margin: 0; overflow: hidden; font-size: 16px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
+.card-status-icon { display: inline-grid; place-items: center; width: 1.15em; height: 1.15em; margin-right: .35em; color: var(--muted); font: 700 .95em/1 "SFMono-Regular", Consolas, monospace; vertical-align: -.08em; }
+.card-status-icon.todo { color: var(--status-todo); }
+.card-status-icon.running { color: var(--status-running); }
+.card-status-icon.done { color: var(--status-done); }
+.card-status-icon.archived { color: var(--status-archived); }
 .spacer { flex: 1; }
 .task-folder { display: inline-flex; align-items: center; gap: 4px; max-width: 42%; overflow: hidden; color: var(--muted); font: 11px "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .task-folder svg, .deadline svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .deadline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.card-unread { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-strong); }
 .deadline.overdue { color: #c4472d; font-weight: 750; }
 .card-desc { margin: 5px 0 13px; color: var(--muted); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .card-desc.is-empty { color: var(--muted); font-style: italic; }
@@ -494,22 +499,24 @@ h1, h2, h3 { text-wrap: balance; }
 .task-board .card-actions .icon-button { width: 30px; min-width: 30px; padding: 5px; }
 .task-board.compact-card-layout .task-board-list { column-count: 1; column-width: auto; column-gap: 11px; }
 .task-board.compact-card-layout .task-board-list .card { break-inside: avoid; margin: 0 0 11px; }
-.card.color-red, .session-task-title.color-red { background: var(--wash-red); }
-.card.color-orange, .session-task-title.color-orange { background: var(--wash-orange); }
-.card.color-yellow, .session-task-title.color-yellow { background: var(--wash-yellow); }
-.card.color-green, .session-task-title.color-green { background: var(--wash-green); }
-.card.color-cyan, .session-task-title.color-cyan { background: var(--wash-cyan); }
-.card.color-blue, .session-task-title.color-blue { background: var(--wash-blue); }
-.card.color-purple, .session-task-title.color-purple { background: var(--wash-purple); }
-.card.color-gray, .session-task-title.color-gray { background: var(--wash-gray); }
-.card.custom-color, .session-task-title.custom-color { background: color-mix(in srgb, var(--task-color) 12%, var(--surface-raised)); }
-.card.custom-color { border-left-color: var(--task-color); }
-.session-task-title.custom-color { color: var(--task-color); }
+.card.color-red, .session-task-heading.color-red { background: var(--wash-red); }
+.card.color-orange, .session-task-heading.color-orange { background: var(--wash-orange); }
+.card.color-yellow, .session-task-heading.color-yellow { background: var(--wash-yellow); }
+.card.color-green, .session-task-heading.color-green { background: var(--wash-green); }
+.card.color-cyan, .session-task-heading.color-cyan { background: var(--wash-cyan); }
+.card.color-blue, .session-task-heading.color-blue { background: var(--wash-blue); }
+.card.color-purple, .session-task-heading.color-purple { background: var(--wash-purple); }
+.card.color-gray, .session-task-heading.color-gray { background: var(--wash-gray); }
+.card.custom-color, .session-task-heading.custom-color { background: color-mix(in srgb, var(--task-color) 12%, var(--surface-raised)); }
+.card.custom-color { border-left-color: var(--line); }
+.session-task-heading.custom-color { color: var(--task-color); }
+.session-task-heading.custom-color .session-task-title { color: var(--task-color); }
+.session-task-heading .session-task-title { background: transparent; }
 
 .color-selector { position: relative; margin-top: 6px; }
 .color-trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 37px; margin: 0; padding: 5px 8px; text-align: left; }
 .color-trigger-swatch { display: block; width: 23px; height: 23px; flex: 0 0 23px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
-.color-picker { position: absolute; top: calc(100% + 6px); left: 0; z-index: 8; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; width: 260px; max-width: calc(100vw - 80px); max-height: 66px; overflow: hidden; margin: 0; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); box-shadow: var(--shadow); }
+.color-picker { position: absolute; top: calc(100% + 6px); left: 0; z-index: 8; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; width: 260px; max-width: calc(100vw - 80px); max-height: min(260px, 45vh); overflow-y: auto; margin: 0; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); box-shadow: var(--shadow); }
 .color-entry { display: inline-flex; align-items: center; width: 23px; height: 23px; }
 .color-option { width: 23px; height: 23px; padding: 3px; border-radius: 6px; }
 .color-option span { display: block; width: 100%; height: 100%; border-radius: 4px; }
@@ -625,11 +632,18 @@ body.session-mode #app-sidebar { flex-basis: 200px; }
 body.session-mode .sidebar-panel { padding-top: 13px; }
 .session-task-group { margin: 4px 0 10px; }
 .session-task-group { min-width: 0; }
-.session-task-heading { display: flex; align-items: center; gap: 4px; }
+.session-task-heading { display: flex; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: 6px; }
 .session-task-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden; padding: 8px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); font-weight: 700; cursor: pointer; text-align: left; }
-.session-task-title:hover { border-color: var(--line); }
+.session-task-heading:hover { border-color: var(--line); }
+.session-task-title:hover { border-color: transparent; }
+/* 任务标题未被指向时收起操作按钮，避免侧栏视觉噪音。 */
+.session-task-heading > .session-new-child,
+.session-task-heading > .session-remove-task { visibility: hidden; opacity: 0; transition: opacity .14s ease, visibility 0s linear .14s; }
+.session-task-heading:hover > .session-new-child,
+.session-task-heading:hover > .session-remove-task,
+.session-task-heading:focus-within > .session-new-child,
+.session-task-heading:focus-within > .session-remove-task { visibility: visible; opacity: 1; transition-delay: 0s; }
 .session-task-title span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-task-unread { flex: 0 0 8px; width: 8px; height: 8px; margin-left: auto; padding: 0; border-radius: 50%; background: var(--accent-strong); }
 .session-new-child { flex: 0 0 32px; width: 32px; min-width: 32px; border: 0; background: transparent; padding: 4px; color: var(--teal); font-size: 16px; }
 .session-new-child:hover { background: transparent; border-color: transparent; color: var(--accent-strong); }
 .session-remove-task { flex: 0 0 32px; width: 32px; min-width: 32px; border: 0; background: transparent; padding: 4px; color: var(--muted); font-size: 16px; }
@@ -637,12 +651,14 @@ body.session-mode .sidebar-panel { padding-top: 13px; }
 .session-child-session { display: flex; align-items: center; gap: 4px; margin: 2px 0; padding: 0; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-size: 13px; }
 .session-child-open { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; padding: 8px 5px 8px 23px; border: 0; background: transparent; color: inherit; text-align: left; transition: padding-left .28s cubic-bezier(.2, .8, .2, 1), padding-right .28s cubic-bezier(.2, .8, .2, 1); }
 .session-child-open > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-unread-count { flex: 0 0 auto; min-width: 19px; padding: 1px 4px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); font-size: 10px; line-height: 1.3; text-align: center; }
 .session-child-session:hover { background: var(--surface-muted); color: var(--ink); }
 .session-child-session:focus-within { background: var(--surface-muted); color: var(--ink); }
 .session-child-session.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent-strong); font-weight: 700; }
 .child-dot { color: var(--teal); font-size: 10px; }
-.session-unread { flex: 0 0 7px; width: 7px; height: 7px; padding: 0; border-radius: 50%; background: var(--accent-strong); }
-.session-child-delete { flex: 0 0 auto; margin-left: auto; border: 0; background: transparent; padding: 4px 8px 4px 4px; color: var(--muted); font-size: 16px; }
+.session-child-delete { flex: 0 0 auto; margin-left: auto; border: 0; background: transparent; padding: 4px 8px 4px 4px; color: var(--muted); font-size: 16px; visibility: hidden; opacity: 0; transition: opacity .14s ease, visibility 0s linear .14s; }
+.session-child-session:hover .session-child-delete,
+.session-child-session:focus-within .session-child-delete { visibility: visible; opacity: 1; transition-delay: 0s; }
 .session-child-delete:hover { background: transparent; border-color: transparent; color: var(--accent-strong); }
 .sidebar-empty { padding: 30px 8px; }
 .session-layout, .session-main { height: 100%; min-height: 0; }
@@ -985,10 +1001,10 @@ body.theme-geek .card {
   border-top: 0;
   border-right-color: var(--line);
   border-bottom-color: var(--line);
-  border-left-width: 3px;
+  border-left-width: 1px;
   background: var(--surface-raised);
 }
-/* 分类色用于卡片底色，状态色仍只用于左侧边框。 */
+/* 分类色用于卡片底色，状态色由标题前图标表达。 */
 body.theme-geek .card.color-red { background: var(--wash-red); }
 body.theme-geek .card.color-orange { background: var(--wash-orange); }
 body.theme-geek .card.color-yellow { background: var(--wash-yellow); }
@@ -999,12 +1015,7 @@ body.theme-geek .card.color-purple { background: var(--wash-purple); }
 body.theme-geek .card.color-gray { background: var(--wash-gray); }
 body.theme-geek .card.custom-color { background: color-mix(in srgb, var(--task-color) 16%, var(--surface-raised)); }
 body.theme-geek .card-head { border-bottom: 1px dashed var(--line); }
-body.theme-geek .card-title::before { content: "$ "; color: var(--accent); font-weight: 400; }
-body.theme-geek .card.running .card-title::before { content: "> "; }
-body.theme-geek .card.done .card-title::before { content: "✓ "; }
-body.theme-geek .card.todo { border-left-color: var(--line-strong); }
-body.theme-geek .card.running { border-left-color: var(--accent); }
-body.theme-geek .card.done { border-left-color: var(--teal); }
+body.theme-geek .card-title::before { content: none; }
 body.theme-geek .task-stats { background: transparent; }
 body.theme-geek .task-stats span + span { border-left-style: dashed; }
 body.theme-geek .card-actions button:not(.primary) { border-style: dashed; }
@@ -1213,7 +1224,7 @@ body.theme-pixel-arcade button:active { transform: translate(2px, 2px); box-shad
 body.theme-pixel-arcade .brand-mark,
 body.theme-pixel-arcade .session-context-icon { border: 2px solid var(--ink); border-radius: 0; background: var(--accent); color: var(--surface-raised); box-shadow: 4px 4px 0 var(--ink); font-family: "JetBrains Mono", monospace; font-weight: 800; }
 body.theme-pixel-arcade .topbar { background: var(--surface); backdrop-filter: none; }
-body.theme-pixel-arcade .card { border: 2px solid var(--line-strong); border-left-width: 6px; box-shadow: 4px 4px 0 var(--line); transition: none; }
+body.theme-pixel-arcade .card { border: 2px solid var(--line-strong); border-left-width: 2px; box-shadow: 4px 4px 0 var(--line); transition: none; }
 body.theme-pixel-arcade .card:hover { transform: none; box-shadow: 6px 6px 0 var(--line-strong); }
 body.theme-pixel-arcade .task-board-column { border: 2px solid var(--line-strong); box-shadow: 4px 4px 0 var(--line); }
 body.theme-pixel-arcade .primary,
@@ -1323,7 +1334,7 @@ body.theme-blueprint .task-board-column,
 body.theme-blueprint .modal { border-radius: 0; }
 body.theme-blueprint button { box-shadow: none; }
 body.theme-blueprint .topbar { background: var(--surface); backdrop-filter: none; border-bottom: 2px solid var(--accent); }
-body.theme-blueprint .card { border-style: dashed; border-left: 4px solid var(--accent); background: color-mix(in srgb, var(--surface-raised) 86%, transparent); box-shadow: none; }
+body.theme-blueprint .card { border-style: dashed; border-left: 1px dashed var(--line); background: color-mix(in srgb, var(--surface-raised) 86%, transparent); box-shadow: none; }
 body.theme-blueprint .card:hover { transform: none; box-shadow: none; border-color: var(--accent); }
 body.theme-blueprint .task-board-column { border: 1px dashed var(--line-strong); background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 body.theme-blueprint .card-head { border-bottom: 1px dashed var(--line); }
@@ -1649,25 +1660,91 @@ body.theme-dopamine .theme-menu { border-radius: 18px; box-shadow: 0 18px 42px r
 body.theme-dopamine .theme-menu-option { border-radius: 11px; }
 body.theme-dopamine .sidebar-header { border-bottom-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
 
+/* 蓝图和报纸主题的卡片会覆盖通用背景，这里保留并强化分类色的纸面/工程底色。 */
+body.theme-blueprint .card.color-red { background: color-mix(in srgb, var(--wash-red) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-orange { background: color-mix(in srgb, var(--wash-orange) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-yellow { background: color-mix(in srgb, var(--wash-yellow) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-green { background: color-mix(in srgb, var(--wash-green) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-cyan { background: color-mix(in srgb, var(--wash-cyan) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-blue { background: color-mix(in srgb, var(--wash-blue) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-purple { background: color-mix(in srgb, var(--wash-purple) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.color-gray { background: color-mix(in srgb, var(--wash-gray) 72%, var(--surface-raised)); }
+body.theme-blueprint .card.custom-color { background: color-mix(in srgb, var(--task-color) 18%, var(--surface-raised)); }
+body.theme-newspaper .card.color-red { background: color-mix(in srgb, var(--wash-red) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-orange { background: color-mix(in srgb, var(--wash-orange) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-yellow { background: color-mix(in srgb, var(--wash-yellow) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-green { background: color-mix(in srgb, var(--wash-green) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-cyan { background: color-mix(in srgb, var(--wash-cyan) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-blue { background: color-mix(in srgb, var(--wash-blue) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-purple { background: color-mix(in srgb, var(--wash-purple) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.color-gray { background: color-mix(in srgb, var(--wash-gray) 78%, var(--surface-raised)); }
+body.theme-newspaper .card.custom-color { background: color-mix(in srgb, var(--task-color) 16%, var(--surface-raised)); }
+
+/* 各主题的深色状态色：状态徽章不能继续使用浅色主题的固定背景。 */
+body.theme-pixel-arcade.theme-dark,
+body.theme-blueprint.theme-dark,
+body.theme-aurora.theme-dark,
+body.theme-newspaper.theme-dark,
+body.theme-dopamine.theme-dark {
+  --status-todo: #f5c451;
+  --status-running: #6edbd5;
+  --status-done: #83d995;
+  --status-archived: #b8b1a0;
+}
+@media (prefers-color-scheme: dark) {
+  body.theme-pixel-arcade:not(.theme-light),
+  body.theme-blueprint:not(.theme-light),
+  body.theme-aurora:not(.theme-light),
+  body.theme-newspaper:not(.theme-light),
+  body.theme-dopamine:not(.theme-light) {
+    --status-todo: #f5c451;
+    --status-running: #6edbd5;
+    --status-done: #83d995;
+    --status-archived: #b8b1a0;
+  }
+}
+
+/* 状态标识沿用各主题的组件语言，而不是所有主题共用同一种胶囊样式。 */
+body.theme-pixel-arcade .chip,
+body.theme-pixel-arcade .badge {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--line);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+body.theme-blueprint .chip,
+body.theme-blueprint .badge {
+  border: 1px dashed var(--line-strong);
+  border-radius: 0;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  letter-spacing: .02em;
+}
+body.theme-aurora .chip,
+body.theme-aurora .badge {
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  border-radius: 999px;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+body.theme-newspaper .chip,
+body.theme-newspaper .badge {
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  font-family: Georgia, "Songti SC", serif;
+  letter-spacing: .03em;
+}
+body.theme-dopamine .chip,
+body.theme-dopamine .badge {
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   #app-sidebar { transition-duration: .01ms; }
 }
 
-/* 左侧色条固定表达任务状态；任务分类色只用于卡片背景。 */
-body.theme-classic .card.todo,
-body.theme-classic .card.custom-color.todo,
-body.theme-geek .card.todo,
-body.theme-geek .card.custom-color.todo { border-left-color: var(--status-todo); }
-body.theme-classic .card.running,
-body.theme-classic .card.custom-color.running,
-body.theme-geek .card.running,
-body.theme-geek .card.custom-color.running { border-left-color: var(--status-running); }
-body.theme-classic .card.done,
-body.theme-classic .card.custom-color.done,
-body.theme-geek .card.done,
-body.theme-geek .card.custom-color.done { border-left-color: var(--status-done); }
-body.theme-classic .card.archived,
-body.theme-geek .card.archived { border-left-color: var(--status-archived); }
+/* 状态图标固定表达任务状态；任务分类色只用于卡片背景。 */
 body.theme-classic .chip.todo,
 body.theme-classic .badge.todo,
 body.theme-geek .chip.todo,

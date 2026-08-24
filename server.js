@@ -8,9 +8,8 @@ import {
   ROOT, DATA_DIR, SESSIONS_DIR, CONFIG_FILE,
   loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, subscribeTasks,
 } from './lib/store.js';
-import { parseSessionFile, evaluateRunningTask, extractText } from './lib/session.js';
-import { runPatch, finishPatch, shouldStartRun, sessionFileForRun } from './lib/task-service.js';
-import { findPiPids, killPi } from './lib/executor.js';
+import { parseSessionFile, extractText } from './lib/session.js';
+import { killPi } from './lib/executor.js';
 import {
   startWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
   isWebTuiRunning, subscribeWebTui, claimWebTuiInput, releaseWebTuiInput,
@@ -70,43 +69,24 @@ function sessionTitleFromPrompt(text) {
   if (!title) return '新会话';
   return title.length > 28 ? `${title.slice(0, 28)}…` : title;
 }
+function assistantMessages(child) {
+  return parseSessionFile(child.sessionFile).entries.filter((entry) => entry.type === 'message' && entry.message?.role === 'assistant');
+}
 function messageTime(entry) {
   const value = entry?.message?.timestamp || entry?.timestamp;
   const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
   return Number.isFinite(time) && time > 0 ? time : 0;
 }
-function assistantMessages(child) {
-  return parseSessionFile(child.sessionFile).entries
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => entry.type === 'message' && entry.message?.role === 'assistant');
-}
-function sessionUnread(child) {
+function sessionUnreadCount(child) {
   const messages = assistantMessages(child);
-  if (!messages.length) return { unread: false, unreadCount: 0 };
-  const markerIndex = child.lastReadMessageId ? messages.findIndex(({ entry }) => entry.id === child.lastReadMessageId) : -1;
+  if (!messages.length) return 0;
+  const markerIndex = child.lastReadMessageId ? messages.findIndex((entry) => entry.id === child.lastReadMessageId) : -1;
   const lastReadAt = Number(child.lastReadAt) || new Date(child.lastReadAt || 0).getTime() || 0;
-  const unreadMessages = markerIndex >= 0
-    ? messages.slice(markerIndex + 1)
-    : messages.filter(({ entry }) => messageTime(entry) > lastReadAt);
-  return { unread: unreadMessages.length > 0, unreadCount: unreadMessages.length };
-}
-function publicSession(child) {
-  let shown = child;
-  if (!child.title || child.title === '主会话' || child.title === '新会话') {
-    const parsed = parseSessionFile(child.sessionFile);
-    for (const entry of parsed.entries) {
-      if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
-      const text = extractText(entry.message.content).trim();
-      if (text) { shown = { ...child, title: sessionTitleFromPrompt(text) }; break; }
-    }
-  }
-  const { lastReadMessageId, lastReadAt, ...safe } = shown;
-  return { ...safe, ...sessionUnread(child) };
+  return markerIndex >= 0 ? messages.length - markerIndex - 1 : messages.filter((entry) => messageTime(entry) > lastReadAt).length;
 }
 function markSessionRead(task, child) {
   if (!task || !child) return false;
-  const messages = assistantMessages(child);
-  const latest = messages.at(-1)?.entry || null;
+  const latest = assistantMessages(child).at(-1) || null;
   const lastReadMessageId = latest?.id || null;
   const lastReadAt = latest ? (messageTime(latest) || Date.now()) : Date.now();
   if (child.lastReadMessageId === lastReadMessageId && Number(child.lastReadAt) === lastReadAt) return false;
@@ -117,16 +97,26 @@ function markSessionRead(task, child) {
 }
 function initializeSessionReadState() {
   let changed = false;
-  for (const task of listTasks()) {
-    for (const child of taskSessions(task)) {
-      if (Object.prototype.hasOwnProperty.call(child, 'lastReadAt')) continue;
-      const latest = assistantMessages(child).at(-1)?.entry || null;
-      child.lastReadMessageId = latest?.id || null;
-      child.lastReadAt = latest ? (messageTime(latest) || Date.now()) : Date.now();
-      changed = true;
-    }
+  for (const task of listTasks()) for (const child of taskSessions(task)) {
+    if (Object.prototype.hasOwnProperty.call(child, 'lastReadAt')) continue;
+    const latest = assistantMessages(child).at(-1) || null;
+    child.lastReadMessageId = latest?.id || null;
+    child.lastReadAt = latest ? (messageTime(latest) || Date.now()) : Date.now();
+    changed = true;
   }
   if (changed) saveTasks();
+}
+function publicSession(child) {
+  let shown = child;
+  if (!child.title || child.title === '主会话' || child.title === '新会话') {
+    for (const entry of parseSessionFile(child.sessionFile).entries) {
+      if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
+      const text = extractText(entry.message.content).trim();
+      if (text) { shown = { ...child, title: sessionTitleFromPrompt(text) }; break; }
+    }
+  }
+  const { lastReadMessageId, lastReadAt, ...safe } = shown;
+  return { ...safe, unreadCount: sessionUnreadCount(child) };
 }
 function persistSessionTitle(task, child) {
   if (!child || (child.title && child.title !== '主会话' && child.title !== '新会话')) return;
@@ -168,7 +158,7 @@ function publicTask(task) {
   return {
     ...task,
     status: displayStatus,
-    sessions: visibleSessions.map(publicSession),
+    sessions: visibleSessions.map((session) => ({ ...publicSession(session), running: isWebTuiRunning(task.id, session.id) })),
     activeSessionId: activeSessionIds.get(task.id) || visibleSessions[0]?.id || null,
     stats: taskStats(task),
     overdue: Boolean(task.deadline && !['done', 'archived'].includes(internalStatus) && new Date(task.deadline).getTime() < Date.now()),
@@ -227,18 +217,16 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
     thinkingLevel: task.thinkingLevel, readOnly: task.readOnly, approve: config.approvePi !== false,
     cols, rows, theme: theme === 'dark' ? 'dark' : 'light',
     onData: () => notifyTaskChanged(task.id, 'session'),
-    onExit: ({ exitCode }) => {
+    onExit: () => {
       const current = getTask(task.id);
       if (!current) return;
       const currentSession = resolveTaskSession(current, childSession.id);
       persistSessionTitle(current, currentSession);
-      if (current.status !== 'running' || isWebTuiRunning(task.id)) return;
-      updateTask(task.id, { lastRun: finishPatch(childSession, exitCode) });
     },
   });
   const current = getTask(task.id);
-  if (!historical && current && shouldStartRun(current, childSession)) {
-    updateTask(task.id, { status: 'running', lastRun: runPatch(childSession) });
+  if (!historical && current && current.status !== 'running') {
+    updateTask(task.id, { status: 'running' });
   }
   return record;
 }
@@ -335,7 +323,7 @@ app.post('/api/tasks/:id/reopen', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (task.status !== 'done') return res.status(409).json({ error: '只有已完成任务可以重开' });
-  res.json({ task: publicTask(updateTask(task.id, { status: 'running', completedAt: null, lastRun: { status: 'reopened', reason: '任务已重新打开', at: nowIso() } })) });
+  res.json({ task: publicTask(updateTask(task.id, { status: 'running', completedAt: null })) });
 });
 
 // 子会话仅保存 pi JSONL 的入口信息；交互全部在原生 TUI 完成。
@@ -345,7 +333,7 @@ app.post('/api/tasks/:id/sessions/:sessionId/read', (req, res) => {
   const session = taskSessions(task).find((item) => item.id === req.params.sessionId);
   if (!session) return res.status(404).json({ error: '子会话不存在' });
   markSessionRead(task, session);
-  res.json({ ok: true, session: publicSession(session) });
+  res.json({ ok: true });
 });
 app.get('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
@@ -405,7 +393,7 @@ app.post('/api/tasks/:id/terminate', async (req, res) => {
   if (task.status !== 'running') return res.status(409).json({ error: '任务不在执行中' });
   const stopped = await stopTaskTui(task.id, { silent: true });
   const killed = killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
-  res.json({ task: publicTask(updateTask(task.id, { lastRun: { status: 'terminated', reason: '已手动终止执行', at: nowIso(), stopped, killed } })) });
+  res.json({ task: publicTask(getTask(task.id)) });
 });
 
 const webSockets = new WebSocketServer({ noServer: true });
@@ -426,7 +414,6 @@ webSockets.on('connection', (ws) => {
     if (task.status !== 'running' && concurrencyFull(1)) return send({ type: 'tui_error', error: `已达到并发上限：${config.maxConcurrent}` });
     try {
       await withTuiLock(id, () => openTaskTui(getTask(id), childSession, cols, rows, theme));
-      markSessionRead(getTask(id), childSession);
       if (taskId && (taskId !== id || sessionId !== childSession.id)) releaseWebTuiInput(taskId, sessionId, clientId);
       taskId = id;
       sessionId = childSession.id;
@@ -449,7 +436,9 @@ webSockets.on('connection', (ws) => {
       // exiting. It is harmless and should not produce a user-facing toast.
       if (message.type === 'tui_input' || message.type === 'tui_resize') {
         if (!taskId || !sessionId || !isWebTuiRunning(taskId, sessionId)) return;
-        if (message.type === 'tui_input') return writeWebTui(taskId, sessionId, clientId, message.data);
+        if (message.type === 'tui_input') {
+          return writeWebTui(taskId, sessionId, clientId, message.data);
+        }
         return resizeWebTui(taskId, sessionId, message.cols, message.rows);
       }
     } catch (error) {
@@ -508,17 +497,6 @@ app.post('/api/config', (req, res) => {
 });
 
 setInterval(() => { void purgeArchivedTasks(); }, 60 * 60 * 1000);
-setInterval(() => {
-  for (const task of listTasks()) {
-    if (task.status !== 'running') continue;
-    const runSession = resolveTaskSession(task, task.lastRun?.sessionId);
-    persistSessionTitle(task, runSession);
-    if (isWebTuiRunning(task.id)) continue;
-    const verdict = evaluateRunningTask(task, { findPiPids, sessionFile: sessionFileForRun(task, runSession) });
-    if (verdict) updateTask(task.id, { lastRun: verdict.lastRun });
-  }
-}, 2000);
-
 loadTasks();
 initializeSessionReadState();
 void purgeArchivedTasks();

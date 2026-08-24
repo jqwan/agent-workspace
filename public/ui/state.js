@@ -18,7 +18,6 @@ export const COLORS = {
 
 const CUSTOM_COLORS_STORAGE_KEY = 'workbench-custom-colors';
 const LAYOUT_STORAGE_KEY = 'workbench-layout';
-const MAX_COLOR_COUNT = 17;
 const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
 
 export const state = {
@@ -43,19 +42,6 @@ export function colorCatalog() { return { ...COLORS, ...customColors }; }
 
 export function saveCustomColors() {
   try { localStorage.setItem(CUSTOM_COLORS_STORAGE_KEY, JSON.stringify(customColors)); } catch { /* ignore unavailable browser storage */ }
-}
-
-export function trimCustomColors(maxColorCount = MAX_COLOR_COUNT) {
-  const maxCustomColors = Math.max(0, maxColorCount - Object.keys(COLORS).length);
-  const removed = [];
-  while (Object.keys(customColors).length > maxCustomColors) {
-    const key = Object.keys(customColors).sort((a, b) => (customColors[a].createdAt || 0) - (customColors[b].createdAt || 0))[0];
-    if (!key) break;
-    removed.push(key);
-    delete customColors[key];
-  }
-  if (removed.length) saveCustomColors();
-  return removed;
 }
 
 export function taskColor(task) {

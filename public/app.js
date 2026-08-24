@@ -2,7 +2,7 @@ import { cost, deadline, esc, number, time } from './ui/format.js';
 import { api } from './ui/api.js';
 import {
   COLORS, STATUS, colorCatalog, customColors, saveCustomColors, state, taskColor,
-  loadLayoutState, saveLayoutState, trimCustomColors,
+  loadLayoutState, saveLayoutState,
 } from './ui/state.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -14,6 +14,7 @@ function customColorStyle(key) {
 
 loadLayoutState();
 let layoutInitialized = false;
+const unreadPollingSessions = new Set();
 let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
@@ -22,17 +23,6 @@ let terminalImeCursorHandler = null;
 let terminalCursorSubscription = null;
 let tuiOpening = null;
 let modalRestoreFocus = null;
-let sessionReadTimer = null;
-function markSessionRead(taskId, sessionId, immediate = false) {
-  if (!taskId || !sessionId) return;
-  const send = () => {
-    sessionReadTimer = null;
-    void api(`/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(() => {});
-  };
-  clearTimeout(sessionReadTimer);
-  if (immediate) send();
-  else sessionReadTimer = setTimeout(send, 350);
-}
 
 function hiddenWorkingDirs() {
   try { const parsed = JSON.parse(localStorage.getItem('workbench-hidden-working-dirs') || '[]'); if (Array.isArray(parsed)) return parsed; } catch { /* ignore malformed browser data */ }
@@ -204,6 +194,7 @@ function renderStats() {
   $('#stats').innerHTML = ['todo', 'running', 'done'].map((key) => `<span class="chip ${STATUS[key].cls}">${STATUS[key].label} ${number(counts[key])}</span>`).join('') + (overdue ? `<span class="chip overdue">逾期 ${number(overdue)}</span>` : '');
 }
 const GROUP_ICONS = { '': '▦', todo: '○', running: '◐', done: '✓', archived: '✕' };
+const STATUS_ICONS = { todo: '○', running: '◐', done: '✓', archived: '✕' };
 function renderTaskSidebar() {
   $('#task-groups').innerHTML = [{ key: '', label: '全部任务' }, ...Object.entries(STATUS).map(([key, value]) => ({ key, label: value.label }))].map(({ key, label }) => {
     const count = key ? state.tasks.filter((task) => task.status === key).length : state.tasks.filter((task) => task.status !== 'archived').length;
@@ -239,7 +230,6 @@ function actions(task) {
   if (task.status === 'done') return `${actionButton('session', task.id, '打开会话', 'open', 'primary')}${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
   return `${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
 }
-function taskUnreadCount(task) { return availableSessions(task).reduce((total, session) => total + (Number(session.unreadCount) || 0), 0); }
 function card(task, compact = false) {
   const stats = task.stats || {};
   const archiveInfo = task.status === 'archived' ? `<div class="archive-info">已废弃 · ${time(task.archivedAt)} · ${task.purgeAt ? `预计 ${time(task.purgeAt)} 自动删除` : ''}</div>` : '';
@@ -248,9 +238,7 @@ function card(task, compact = false) {
   const description = task.description?.trim() ? esc(task.description) : '暂无描述';
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
-  const unread = taskUnreadCount(task);
-  const unreadBadge = unread ? `<span class="card-unread" title="${unread}条未读消息" aria-label="${unread}条未读消息"></span>` : '';
-  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${unreadBadge}${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
 }
 function syncBoardGroupOptions() {
   const options = [{ value: 'single', label: '全部' }];
@@ -320,11 +308,8 @@ function renderSessionTree() {
     const sessions = availableSessions(task);
     const colorKey = taskColor(task);
     const customClass = customColors[colorKey] ? ' custom-color' : '';
-    const taskUnread = sessions.reduce((total, session) => total + (Number(session.unreadCount) || 0), 0);
-    const taskAction = task.status === 'done'
-      ? `<button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`
-      : `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button>`;
-    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}${taskUnread ? `，${taskUnread}条未读消息` : ''}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span>${taskUnread ? `<b class="session-task-unread" aria-label="${taskUnread}条未读消息"></b>` : ''}</button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const unread = Number(session.unreadCount) || 0; const title = session.title || `子会话 ${index + 1}`; return `<div class="session-child-session${state.sessionTask === task.id && state.sessionSessionId === session.id ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unread}条未读消息` : ''}"><span class="child-dot" aria-hidden="true">●</span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread" aria-label="${unread}条未读消息"></b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
+    const taskAction = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
+    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot" aria-hidden="true">●</span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread-count">${unreadLabel}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
   }).join('') : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
 }
 async function refresh() {
@@ -332,13 +317,17 @@ async function refresh() {
     const data = await api('/tasks');
     const signature = JSON.stringify(data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.stats?.messages, task.stats?.totalTokens]));
     state.tasks = data.tasks;
+    for (const key of unreadPollingSessions) {
+      const [taskId, sessionId] = key.split(':');
+      const session = state.tasks.find((task) => task.id === taskId)?.sessions?.find((item) => item.id === sessionId);
+      if (!session?.running) unreadPollingSessions.delete(key);
+    }
     if (state.sessionTask && !sessionTasks().some((task) => task.id === state.sessionTask)) {
       detachTui();
       state.sessionTask = null;
       state.sessionSessionId = 'main';
       saveLayoutState();
     }
-    trimCustomColors();
     renderStats(); renderTaskSidebar(); renderSessionTree();
     if (signature !== state.signature && !$('.modal')) renderList();
     state.signature = signature;
@@ -416,6 +405,8 @@ async function openNativeTui() {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs')]);
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
       terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: document.body.classList.contains('theme-geek') ? '"JetBrains Mono", "SFMono-Regular", Consolas, monospace' : 'Consolas, "Cascadia Mono", "SFMono-Regular", monospace', theme: terminalTheme() });
+      const browserPlatform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+      const isWindowsBrowser = /^win/i.test(browserPlatform);
       terminal.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
         const key = event.key.toLowerCase();
@@ -431,10 +422,12 @@ async function openNativeTui() {
         if (key === 'v') {
           event.preventDefault();
           event.stopPropagation();
-          // Let pi read the native macOS clipboard. Its Ctrl+V handler can
-          // save clipboard images to a temp file and insert the path, while
-          // still falling back to plain text paste.
-          if (tuiSocket?.readyState === WebSocket.OPEN) tuiSocket.send(JSON.stringify({ type: 'tui_input', data: '\x16' }));
+          // Ask pi to read the native clipboard instead of letting xterm send
+          // the browser shortcut as terminal input. Pi uses Ctrl+V on
+          // macOS/Linux and Alt+V on Windows; both paths support text fallback
+          // and clipboard images (inserted as a temporary file path).
+          const pasteKey = isWindowsBrowser ? '\x1bv' : '\x16';
+          if (tuiSocket?.readyState === WebSocket.OPEN) tuiSocket.send(JSON.stringify({ type: 'tui_input', data: pasteKey }));
           else toast('粘贴失败，请先连接会话', 'error');
           return false;
         }
@@ -466,7 +459,6 @@ async function openNativeTui() {
           if (event.type === 'tui_reset') { terminal?.reset(); sendSize(); }
           else if (event.type === 'tui_data') {
             terminal?.write(event.data || '');
-            if (document.visibilityState === 'visible' && state.module === 'session' && state.sessionTask === taskId && state.sessionSessionId === sessionId) markSessionRead(taskId, sessionId, true);
           }
           else if (event.type === 'tui_exit') terminal?.write(`\r\n\r\n[工作台] pi 已退出（${event.exitCode ?? '未知'}）。\r\n`);
           else if (event.type === 'tui_error') {
@@ -506,16 +498,28 @@ async function restartTuiForTheme() {
   await restartCurrentTui('主题已切换，正在重启会话…');
 }
 function selectSession(taskId, sessionId = 'main') {
+  if (state.sessionTask && (state.sessionTask !== taskId || state.sessionSessionId !== sessionId)) leaveCurrentSession();
+  // 重复点击当前子会话不应重启 TUI。
+  const task = currentTask(taskId);
+  const target = availableSessions(task).find((session) => session.id === sessionId);
+  const nextSessionId = target?.id || task?.activeSessionId || availableSessions(task)[0]?.id || 'main';
+  if (taskId && state.sessionTask === taskId && state.sessionSessionId === nextSessionId && tuiSocket) {
+    renderSessionTree();
+    return;
+  }
   detachTui();
   state.sessionTask = taskId || null;
   // 新建任务没有「主会话」；传入的 id 不存在时回退到服务端活跃会话或首个会话
-  const task = currentTask(taskId);
-  const target = availableSessions(task).find((session) => session.id === sessionId);
-  state.sessionSessionId = target?.id || task?.activeSessionId || availableSessions(task)[0]?.id || 'main';
-  renderSessionTree();
+  state.sessionSessionId = nextSessionId;
+  unreadPollingSessions.delete(`${taskId}:${nextSessionId}`);
+  renderSessionHeader();
+  document.querySelectorAll('#session-tree .session-child-session').forEach((item) => {
+    const active = item.dataset.sessionTask === state.sessionTask && item.dataset.sessionId === state.sessionSessionId;
+    item.classList.toggle('active', active);
+    if (active) item.querySelector('.session-unread-count')?.remove();
+  });
   saveLayoutState();
   if (taskId) {
-    markSessionRead(taskId, state.sessionSessionId, true);
     void openNativeTui();
   }
 }
@@ -574,11 +578,6 @@ function openTaskForm(task = null, options = {}) {
   const setColorPopup = (open) => {
     colorPicker.classList.toggle('hidden', !open);
     colorTrigger.setAttribute('aria-expanded', String(open));
-    if (open) {
-      const removed = trimCustomColors(colorCapacity());
-      if (removed.includes($('#task-color', form).value)) $('#task-color', form).value = 'blue';
-      if (removed.length) renderColorPicker();
-    }
   };
   const updateColorTrigger = () => {
     const selected = $('#task-color', form).value;
@@ -639,8 +638,7 @@ function openTaskForm(task = null, options = {}) {
     }
     const key = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     customColors[key] = { label: value.toUpperCase(), value, createdAt: Date.now() };
-    const removed = trimCustomColors();
-    if (customColors[key]) $('#task-color', form).value = key;
+    $('#task-color', form).value = key;
     saveCustomColors();
     renderColorPicker();
 
@@ -773,6 +771,16 @@ function openDeleteSessionModal(task, sessionId) {
   $('[data-close]', form).onclick = closeModal;
   $('#confirm-delete-session', form).onclick = async () => { try { const remaining = task.sessions?.find((item) => item.id !== sessionId); await api(`/tasks/${task.id}/sessions/${sessionId}`, { method: 'DELETE' }); closeModal(); await refresh(); if (state.sessionTask === task.id && state.sessionSessionId === sessionId && remaining) selectSession(task.id, remaining.id); } catch (error) { toast(error.message, 'error'); } };
 }
+function leaveCurrentSession() {
+  if (!state.sessionTask || !state.sessionSessionId) return;
+  const session = currentTask(state.sessionTask)?.sessions?.find((item) => item.id === state.sessionSessionId);
+  if (tuiSocket || session?.running) unreadPollingSessions.add(`${state.sessionTask}:${state.sessionSessionId}`);
+  markSessionRead(state.sessionTask, state.sessionSessionId);
+}
+function markSessionRead(taskId, sessionId) {
+  if (!taskId || !sessionId) return;
+  void api(`/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(() => {});
+}
 function syncModuleTabs() {
   const session = state.module === 'session';
   $('#module-session').tabIndex = session ? 0 : -1;
@@ -780,6 +788,7 @@ function syncModuleTabs() {
 }
 function switchModule(module) {
   const session = module === 'session';
+  if (!session && state.sessionTask) leaveCurrentSession();
   state.module = session ? 'session' : 'tasks';
   saveLayoutState();
   document.body.classList.toggle('session-mode', session);
@@ -858,6 +867,13 @@ $('#session-title').onclick = () => {
   renderSessionHeader();
   saveLayoutState();
 };
+document.addEventListener('click', (event) => {
+  if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
+    state.sessionDescriptionOpen = false;
+    renderSessionHeader();
+    saveLayoutState();
+  }
+});
 $('#copy-session-file').onclick = async () => {
   const path = $('#session-file-path').textContent;
   if (!path) return;
@@ -866,13 +882,6 @@ $('#copy-session-file').onclick = async () => {
     toast('pi 会话命令已复制');
   } catch { toast('复制失败，请手动选择命令', 'error'); }
 };
-document.addEventListener('click', (event) => {
-  if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
-    state.sessionDescriptionOpen = false;
-    renderSessionHeader();
-    saveLayoutState();
-  }
-});
 $('#session-restart').onclick = () => { void restartCurrentTui(); };
 $('#session-tree').onclick = (event) => {
   const create = event.target.closest('[data-new-session-task]');
@@ -977,10 +986,14 @@ function scheduleRefresh(delay = 100) {
 const taskEvents = new EventSource('/api/events');
 taskEvents.onmessage = ({ data }) => {
   try {
-    if (JSON.parse(data).type === 'tasks_changed') scheduleRefresh();
+    const event = JSON.parse(data);
+    if (event.type === 'tasks_changed' && (event.reason !== 'session' || unreadPollingSessions.size > 0)) scheduleRefresh();
   } catch { /* ignore malformed event */ }
 };
-window.addEventListener('pagehide', () => taskEvents.close(), { once: true });
+window.addEventListener('pagehide', () => {
+  if (state.sessionTask) markSessionRead(state.sessionTask, state.sessionSessionId);
+  taskEvents.close();
+}, { once: true });
 refresh();
-// SSE is the normal update path; this slower poll is only a recovery fallback.
-setInterval(refresh, 15000);
+// SSE 是实时更新路径；定时轮询用于补偿 session 文件写入没有触发事件的情况。
+setInterval(() => { if (unreadPollingSessions.size > 0) void refresh(); }, 3000);

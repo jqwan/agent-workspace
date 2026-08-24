@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { evaluateRunningTask, parseSessionFile } from '../lib/session.js';
+import { parseSessionFile } from '../lib/session.js';
 
 function sessionFile(entries) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'pi-workbench-session-'));
@@ -30,19 +30,3 @@ test('parseSessionFile caches unchanged JSONL and returns statistics', () => {
   }
 });
 
-test('running-task evaluation follows the active child session', () => {
-  const now = Date.now();
-  const old = sessionFile([{ type: 'session', id: 'old' }]);
-  const active = sessionFile([
-    { type: 'session', id: 'active' },
-    { type: 'message', message: { role: 'assistant', timestamp: new Date(now).toISOString(), stopReason: 'stop' } },
-  ]);
-  try {
-    const task = { sessionFile: old.file, lastRun: { status: 'running', at: new Date(now - 1000).toISOString(), sessionFile: active.file } };
-    const result = evaluateRunningTask(task, { now, findPiPids: () => [] });
-    assert.equal(result.lastRun.status, 'done');
-  } finally {
-    rmSync(old.dir, { recursive: true, force: true });
-    rmSync(active.dir, { recursive: true, force: true });
-  }
-});
