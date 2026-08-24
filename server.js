@@ -11,7 +11,7 @@ import {
 import { parseSessionFile, extractText } from './lib/session.js';
 import { killPi } from './lib/executor.js';
 import {
-  startWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
+  startWebTui, stopWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
   isWebTuiRunning, subscribeWebTui, claimWebTuiInput, releaseWebTuiInput,
 } from './lib/tui-executor.js';
 
@@ -216,7 +216,6 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
     title: childSession.title || task.title, provider: task.modelProvider, model: task.model,
     thinkingLevel: task.thinkingLevel, readOnly: task.readOnly, approve: config.approvePi !== false,
     cols, rows, theme: theme === 'dark' ? 'dark' : 'light',
-    onData: () => notifyTaskChanged(task.id, 'session'),
     onExit: () => {
       const current = getTask(task.id);
       if (!current) return;
@@ -315,9 +314,11 @@ app.post('/api/tasks/:id/complete', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   if (!['todo', 'running'].includes(task.status)) return res.status(409).json({ error: '当前状态不能标记完成' });
-  await stopTaskTui(task.id, { silent: true });
-  killPi(resolveTaskSession(task)?.sessionFile || task.sessionFile);
-  res.json({ task: publicTask(updateTask(task.id, { status: 'done', completedAt: nowIso() })) });
+  stopWebTui(task.id, { silent: true });
+  const result = publicTask(updateTask(task.id, { status: 'done', completedAt: nowIso() }));
+  res.json({ task: result });
+  // 不阻塞完成接口；进程清理由后台任务完成。
+  setImmediate(() => { killPi(resolveTaskSession(getTask(task.id))?.sessionFile || task.sessionFile); });
 });
 app.post('/api/tasks/:id/reopen', (req, res) => {
   const task = getTask(req.params.id);
