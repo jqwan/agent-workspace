@@ -20,6 +20,12 @@ let fitAddon = null;
 let terminalResizeObserver = null;
 let terminalImeCursorHandler = null;
 let terminalCursorSubscription = null;
+let terminalWriteParsedSubscription = null;
+let terminalWriteTimer = null;
+let terminalWriteBuffer = [];
+let terminalImePositionFrame = null;
+let terminalImeComposing = false;
+let terminalImeInputStyle = null;
 let tuiOpening = null;
 let modalRestoreFocus = null;
 const seenSessionMessageIds = new Map();
@@ -495,19 +501,47 @@ function terminalTheme() {
   return {
     background,
     foreground,
-    cursor: accent,
+    // Pi keeps the hardware cursor enabled for Windows IME positioning. Match
+    // its paint to the terminal background so the parked cursor is not visible.
+    cursor: background,
+    cursorAccent: background,
     selectionBackground,
     ...palettes[theme][dark ? 'dark' : 'light'],
     brightBlack: muted,
   };
 }
+function clearQueuedTerminalWrite() {
+  if (terminalWriteTimer !== null) clearTimeout(terminalWriteTimer);
+  terminalWriteTimer = null;
+  terminalWriteBuffer = [];
+}
+function flushQueuedTerminalWrite() {
+  terminalWriteTimer = null;
+  const data = terminalWriteBuffer.join('');
+  terminalWriteBuffer = [];
+  if (data && terminal) terminal.write(data);
+}
+function queueTerminalWrite(data) {
+  if (!terminal || !data) return;
+  terminalWriteBuffer.push(String(data));
+  // PTY chunks can split one Pi redraw. Paint complete redraws together so
+  // the editor cursor never briefly disappears between ANSI operations.
+  if (terminalWriteTimer === null) terminalWriteTimer = setTimeout(flushQueuedTerminalWrite, 16);
+}
 function disposeTerminal() {
   terminalResizeObserver?.disconnect(); terminalResizeObserver = null;
   terminalCursorSubscription?.dispose(); terminalCursorSubscription = null;
+  terminalWriteParsedSubscription?.dispose(); terminalWriteParsedSubscription = null;
+  clearQueuedTerminalWrite();
+  if (terminalImePositionFrame !== null) cancelAnimationFrame(terminalImePositionFrame);
+  terminalImePositionFrame = null;
+  terminalImeComposing = false; terminalImeInputStyle = null;
   const box = $('#session-terminal');
   if (terminalImeCursorHandler) {
     box.removeEventListener('compositionstart', terminalImeCursorHandler);
+    box.removeEventListener('compositionend', terminalImeCursorHandler);
     box.removeEventListener('focusin', terminalImeCursorHandler);
+    box.removeEventListener('focusout', terminalImeCursorHandler);
   }
   terminalImeCursorHandler = null;
   try { terminal?.dispose(); } catch { /* already disposed */ }
@@ -522,7 +556,7 @@ function detachTui() {
 function positionTerminalImeInput() {
   const input = terminal?.element?.querySelector('.xterm-helper-textarea');
   const screen = terminal?.element?.querySelector('.xterm-screen');
-  if (!input || !screen || !terminal?.cols || !terminal?.rows) return;
+  if (!input || !screen || !terminal?.cols || !terminal?.rows) return null;
   const rect = screen.getBoundingClientRect();
   const cursor = terminal.buffer.active;
   input.style.left = `${Math.max(0, Math.min(terminal.cols - 1, cursor.cursorX)) * rect.width / terminal.cols}px`;
@@ -530,6 +564,19 @@ function positionTerminalImeInput() {
   input.style.width = `${Math.max(1, rect.width / terminal.cols)}px`;
   input.style.height = `${Math.max(1, rect.height / terminal.rows)}px`;
   input.style.zIndex = '5';
+  return { left: input.style.left, top: input.style.top, width: input.style.width, height: input.style.height, zIndex: input.style.zIndex };
+}
+function restoreTerminalImeInput() {
+  const input = terminal?.element?.querySelector('.xterm-helper-textarea');
+  if (input && terminalImeInputStyle) Object.assign(input.style, terminalImeInputStyle);
+}
+function scheduleTerminalImeInputPosition() {
+  if (terminalImePositionFrame !== null) return;
+  terminalImePositionFrame = requestAnimationFrame(() => {
+    terminalImePositionFrame = null;
+    if (terminalImeComposing) restoreTerminalImeInput();
+    else positionTerminalImeInput();
+  });
 }
 async function openNativeTui() {
   if (tuiOpening) return tuiOpening;
@@ -547,7 +594,7 @@ async function openNativeTui() {
     try {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs')]);
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
-      terminal = new Terminal({ cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: terminalFontFamily(), theme: terminalTheme() });
+      terminal = new Terminal({ cursorBlink: false, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: terminalFontFamily(), theme: terminalTheme() });
       const browserPlatform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
       const isWindowsBrowser = /^win/i.test(browserPlatform);
       terminal.attachCustomKeyEventHandler((event) => {
@@ -577,10 +624,27 @@ async function openNativeTui() {
         return true;
       });
       fitAddon = new FitAddon(); terminal.loadAddon(fitAddon); terminal.open(box); fitAddon.fit(); terminal.focus();
-      terminalImeCursorHandler = () => requestAnimationFrame(positionTerminalImeInput);
+      terminalImeCursorHandler = (event) => {
+        if (event?.type === 'compositionstart') {
+          terminalImeComposing = true;
+          terminalImeInputStyle = positionTerminalImeInput();
+          return;
+        }
+        if (event?.type === 'compositionend' || event?.type === 'focusout') {
+          terminalImeComposing = false;
+          terminalImeInputStyle = null;
+        }
+        // xterm relocates its helper textarea for every cursor movement. Keep
+        // it fixed throughout an IME composition, even while Pi redraws.
+        if (terminalImeComposing) return restoreTerminalImeInput();
+        scheduleTerminalImeInputPosition();
+      };
       terminalCursorSubscription = terminal.onCursorMove(terminalImeCursorHandler);
+      terminalWriteParsedSubscription = terminal.onWriteParsed(terminalImeCursorHandler);
       box.addEventListener('compositionstart', terminalImeCursorHandler);
+      box.addEventListener('compositionend', terminalImeCursorHandler);
       box.addEventListener('focusin', terminalImeCursorHandler);
+      box.addEventListener('focusout', terminalImeCursorHandler);
       terminalImeCursorHandler();
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const socket = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -599,16 +663,14 @@ async function openNativeTui() {
       socket.onmessage = ({ data }) => {
         try {
           const event = JSON.parse(data);
-          if (event.type === 'tui_reset') { terminal?.reset(); sendSize(); }
-          else if (event.type === 'tui_data') {
-            terminal?.write(event.data || '');
-          }
-          else if (event.type === 'tui_exit') terminal?.write(`\r\n\r\n[工作台] pi 已退出（${event.exitCode ?? '未知'}）。\r\n`);
+          if (event.type === 'tui_reset') { clearQueuedTerminalWrite(); terminal?.reset(); sendSize(); }
+          else if (event.type === 'tui_data') queueTerminalWrite(event.data || '');
+          else if (event.type === 'tui_exit') queueTerminalWrite(`\r\n\r\n[工作台] pi 已退出（${event.exitCode ?? '未知'}）。\r\n`);
           else if (event.type === 'tui_error') {
             const error = event.error || '终端错误';
             // Ignore stale frames emitted while a PTY is already exiting.
             if (error === '会话未运行') return;
-            terminal?.write(`\r\n[工作台] ${error}\r\n`);
+            queueTerminalWrite(`\r\n[工作台] ${error}\r\n`);
             toast(error, 'error');
           }
         } catch { /* ignore malformed frames */ }
@@ -616,7 +678,7 @@ async function openNativeTui() {
       socket.onerror = () => toast('会话连接失败，请查看服务终端中的错误信息', 'error');
       socket.onclose = () => {
         if (tuiSocket === socket) tuiSocket = null;
-        if (state.sessionTask === taskId && terminal) terminal.write('\r\n[工作台] 终端连接已断开，点击“重新连接”可恢复。\r\n');
+        if (state.sessionTask === taskId && terminal) queueTerminalWrite('\r\n[工作台] 终端连接已断开，点击“重新连接”可恢复。\r\n');
       };
     } catch (error) {
       detachTui();
