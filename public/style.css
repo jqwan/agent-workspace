@@ -616,11 +616,21 @@ body.sidebar-collapsed #app-sidebar { flex-basis: 44px !important; }
 .sidebar-collapsed .sidebar-panel .sidebar-action { padding: 0 9px; text-align: center; border-color: transparent; box-shadow: none; }
 .sidebar-collapsed .task-groups,
 .sidebar-collapsed #session-tree { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; }
-.sidebar-collapsed .task-group-item,
-.sidebar-collapsed .session-task-title { padding-left: 9px; padding-right: 9px; }
+.sidebar-collapsed .task-group-item { padding-left: 9px; padding-right: 9px; }
+.sidebar-collapsed .session-task-title {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
 .sidebar-collapsed .task-group-item b, .sidebar-collapsed .session-child-delete, .sidebar-collapsed .session-new-child, .sidebar-collapsed .session-remove-task, .sidebar-collapsed .session-unread-count { display: none; }
 .sidebar-collapsed .session-child-session { background: var(--surface-muted); }
-.sidebar-collapsed .session-child-open { justify-content: flex-start; padding-left: 12px; padding-right: 8px; }
+.sidebar-collapsed .session-child-open {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
 .sidebar-collapsed .session-child-session.active { background: var(--accent-soft); }
 
 /* Native TUI workspace */
@@ -673,8 +683,8 @@ body.session-mode .sidebar-panel { padding-top: 13px; }
 .session-context { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .session-context-icon { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 7px 7px 7px 2px; background: var(--accent-strong); color: #fffaf4; font: 18px Georgia, serif; }
 .session-context-copy { min-width: 0; }
-.session-file-row { display: flex; align-items: center; gap: 4px; max-width: 520px; margin-top: 7px; }
-.session-file-path { display: block; min-width: 0; overflow: hidden; color: var(--muted); font: 10px/1.2 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.session-file-row { display: flex; align-items: center; gap: 4px; max-width: 520px; margin-top: 5px; }
+.session-file-path { display: block; min-width: 0; overflow: hidden; color: var(--muted); font: 11px/1.2 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .session-file-copy { flex: 0 0 auto; padding: 0 3px; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; }
 .session-file-copy:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--accent-strong); }
 .session-file-copy:disabled { visibility: hidden; }
@@ -1148,6 +1158,7 @@ body.theme-pixel-arcade {
   --teal: #1b9aaa;
   --terminal: #f6f0dc;
   --shadow: 4px 4px 0 rgba(38, 59, 100, .22);
+  --pixel-shadow: #263b64;
   --danger: #c62828;
   --status-todo: #a16207;
   --status-running: #087f8c;
@@ -1180,6 +1191,7 @@ body.theme-pixel-arcade.theme-dark {
   --teal: #56d8d5;
   --terminal: #101528;
   --shadow: 4px 4px 0 rgba(0, 0, 0, .34);
+  --pixel-shadow: #070a16;
   --danger: #ff9b8d;
   --wash-red: #452638;
   --wash-orange: #493725;
@@ -1207,6 +1219,7 @@ body.theme-pixel-arcade.theme-dark {
     --teal: #56d8d5;
     --terminal: #101528;
     --shadow: 4px 4px 0 rgba(0, 0, 0, .34);
+    --pixel-shadow: #070a16;
     --danger: #ff9b8d;
     --wash-red: #452638;
     --wash-orange: #493725;
@@ -1263,11 +1276,271 @@ body.theme-pixel-arcade #sidebar-new-task,
 body.theme-pixel-arcade #session-sidebar-new-task { background: color-mix(in srgb, var(--accent-strong) 86%, #000) !important; border-color: var(--ink) !important; color: var(--surface-raised) !important; box-shadow: 4px 4px 0 var(--ink); }
 body.theme-pixel-arcade .theme-menu { border: 2px solid var(--ink); border-radius: 0; box-shadow: 4px 4px 0 var(--ink); }
 body.theme-pixel-arcade .theme-menu-option { border-radius: 0; }
-body.theme-pixel-arcade .session-task-heading { border-radius: 0; }
-body.theme-pixel-arcade .session-task-title,
+/* 会话树借用街机卡带与存档槽的语言：任务是卡带标签，当前会话是已插入的存档。 */
+body.theme-pixel-arcade .session-task-heading {
+  margin: 0 0 8px;
+  border: 0;
+  border-radius: 0;
+}
+body.theme-pixel-arcade .session-task-heading:hover,
+body.theme-pixel-arcade .session-task-heading:focus-within { border-color: transparent; }
+body.theme-pixel-arcade .session-task-title {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface-muted);
+  box-shadow: 4px 4px 0 var(--line-strong);
+}
+body.theme-pixel-arcade .session-task-title.color-red { background: var(--wash-red); }
+body.theme-pixel-arcade .session-task-title.color-orange { background: var(--wash-orange); }
+body.theme-pixel-arcade .session-task-title.color-yellow { background: var(--wash-yellow); }
+body.theme-pixel-arcade .session-task-title.color-green { background: var(--wash-green); }
+body.theme-pixel-arcade .session-task-title.color-cyan { background: var(--wash-cyan); }
+body.theme-pixel-arcade .session-task-title.color-blue { background: var(--wash-blue); }
+body.theme-pixel-arcade .session-task-title.color-purple { background: var(--wash-purple); }
+body.theme-pixel-arcade .session-task-title.color-gray { background: var(--wash-gray); }
+body.theme-pixel-arcade .session-task-title.custom-color { background: color-mix(in srgb, var(--task-color) 20%, var(--surface-raised)); }
+body.theme-pixel-arcade .session-task-title:hover { color: var(--ink); }
+/* 保持按钮原尺寸，只让两个标题操作稍微向左错开，避免贴住卡带边缘。 */
+body.theme-pixel-arcade .session-task-heading > button.session-new-child { right: 30px; }
+body.theme-pixel-arcade .session-task-heading > button.session-remove-task { right: 4px; }
+body.theme-pixel-arcade .session-task-title { padding-right: 64px; }
 body.theme-pixel-arcade .session-new-child,
-body.theme-pixel-arcade .session-remove-task { box-shadow: none; border-radius: 0; }
+body.theme-pixel-arcade .session-remove-task,
+body.theme-pixel-arcade .session-child-open,
+body.theme-pixel-arcade .session-child-delete { box-shadow: none; border-radius: 0; }
+body.theme-pixel-arcade .session-child-session {
+  margin: 5px 0;
+  border: 0;
+  border-radius: 0;
+}
+body.theme-pixel-arcade .session-child-session:hover,
+body.theme-pixel-arcade .session-child-session:focus-within {
+  border-color: var(--line);
+  border-radius: 0;
+  background: var(--surface-muted);
+}
+body.theme-pixel-arcade .session-child-session.active {
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  background: var(--accent-soft);
+  box-shadow: 4px 4px 0 var(--line-strong);
+  color: var(--accent-strong);
+}
+body.theme-pixel-arcade .session-child-session.active .child-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+body.theme-pixel-arcade .session-task-heading:has(.session-task-title:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
 body.theme-pixel-arcade .sidebar-header { border-bottom: 2px solid var(--line-strong); }
+/* 收起时是街机控制杆轨道，不应把无标签的任务/会话树压成难以辨认的图标堆。 */
+body.theme-pixel-arcade.sidebar-collapsed #app-sidebar {
+  flex-basis: 52px !important;
+  box-shadow: inset -2px 0 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade.sidebar-collapsed .sidebar-nav { border-bottom: 2px solid var(--line-strong); }
+body.theme-pixel-arcade.sidebar-collapsed .sidebar-panel { padding: 13px 5px; }
+/* 收起时也沿用与任务标题相同的宽度；选中视觉由内层会话标题按钮承载。 */
+body.theme-pixel-arcade.sidebar-collapsed .session-child-session,
+body.theme-pixel-arcade.sidebar-collapsed .session-child-session.active {
+  margin: 5px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+body.theme-pixel-arcade.sidebar-collapsed .sidebar-panel .sidebar-action {
+  border: 2px solid var(--accent);
+  box-shadow: none;
+}
+body.theme-pixel-arcade.sidebar-collapsed .session-task-title,
+body.theme-pixel-arcade.sidebar-collapsed .session-child-open {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* 收起按钮默认以 translateX 居中，悬浮和按下只能在该基准上叠加位移。 */
+body.theme-pixel-arcade.sidebar-collapsed button.sidebar-toggle:hover {
+  transform: translateX(6px);
+  box-shadow: none;
+}
+body.theme-pixel-arcade.sidebar-collapsed button.sidebar-toggle:active:not(:disabled) {
+  transform: translateX(6px) translate(2px, 2px);
+  box-shadow: none;
+}
+
+/* 街机全局语言：按键有投影、面板像机箱、输入框是内嵌插槽；不把投影只留给单一控件。 */
+body.theme-pixel-arcade #workspace-main {
+  background-image: linear-gradient(color-mix(in srgb, var(--line-strong) 16%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--line-strong) 16%, transparent) 1px, transparent 1px);
+}
+body.theme-pixel-arcade .topbar {
+  border-bottom: 2px solid var(--line-strong);
+  box-shadow: 0 4px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade #app-sidebar {
+  border-right: 2px solid var(--line-strong);
+  box-shadow: 4px 0 0 var(--pixel-shadow);
+  z-index: 2;
+}
+body.theme-pixel-arcade .toolbar-controls,
+body.theme-pixel-arcade .task-board-column,
+body.theme-pixel-arcade .modal,
+body.theme-pixel-arcade .theme-menu {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .toolbar-controls { background: var(--surface); }
+body.theme-pixel-arcade .toolbar select,
+body.theme-pixel-arcade .toolbar input,
+body.theme-pixel-arcade .topbar-tools select,
+body.theme-pixel-arcade .modal input,
+body.theme-pixel-arcade .modal textarea,
+body.theme-pixel-arcade .modal select {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface-raised);
+  box-shadow: inset 2px 2px 0 color-mix(in srgb, var(--pixel-shadow) 22%, transparent);
+}
+body.theme-pixel-arcade button {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade button:hover:not(:disabled) {
+  /* 悬浮只改变描边；会话树等紧凑控件若位移会让指针反复进出，产生抖动。 */
+  transform: none;
+  border-color: var(--accent);
+  box-shadow: 3px 3px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade button:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .sidebar-toggle,
+body.theme-pixel-arcade .sidebar-theme-button,
+body.theme-pixel-arcade .sidebar-nav-item,
+body.theme-pixel-arcade .task-group-item,
+body.theme-pixel-arcade .session-new-child,
+body.theme-pixel-arcade .session-remove-task,
+body.theme-pixel-arcade .session-child-open,
+body.theme-pixel-arcade .session-child-delete,
+body.theme-pixel-arcade .session-file-copy {
+  border: 2px solid transparent;
+  box-shadow: none;
+}
+body.theme-pixel-arcade .sidebar-nav-item,
+body.theme-pixel-arcade .task-group-item { border-radius: 0; }
+body.theme-pixel-arcade .sidebar-nav-item:hover,
+body.theme-pixel-arcade .task-group-item:hover {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  color: var(--ink);
+  transform: none;
+}
+body.theme-pixel-arcade .sidebar-nav-item.active,
+body.theme-pixel-arcade .task-group-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 3px 3px 0 var(--pixel-shadow);
+  color: var(--accent-strong);
+}
+body.theme-pixel-arcade .task-group-item b,
+body.theme-pixel-arcade .session-unread-count {
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface-raised);
+  box-shadow: 2px 2px 0 var(--pixel-shadow);
+  color: var(--ink);
+}
+body.theme-pixel-arcade .card {
+  border: 2px solid var(--line-strong);
+  box-shadow: 4px 4px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .card:hover {
+  border-color: var(--accent);
+  box-shadow: 6px 6px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .chip,
+body.theme-pixel-arcade .badge {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .session-header {
+  border-bottom: 2px solid var(--line-strong);
+  background: var(--surface);
+}
+body.theme-pixel-arcade .session-terminal {
+  border: 0;
+  background: var(--terminal);
+}
+body.theme-pixel-arcade .session-description-panel,
+body.theme-pixel-arcade .color-picker,
+body.theme-pixel-arcade .recent-dir-list,
+body.theme-pixel-arcade .toast {
+  border: 2px solid var(--line-strong);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .primary,
+body.theme-pixel-arcade .sidebar-action,
+body.theme-pixel-arcade #sidebar-new-task,
+body.theme-pixel-arcade #session-sidebar-new-task,
+body.theme-pixel-arcade .session-task-title,
+body.theme-pixel-arcade .session-child-session.active {
+  box-shadow: 3px 3px 0 var(--pixel-shadow);
+}
+/* 任务标题本身是按钮；会话名称也让实际按钮承载背景/描边，避免外层选框与内层标题错位。 */
+body.theme-pixel-arcade .session-child-session:hover,
+body.theme-pixel-arcade .session-child-session:focus-within,
+body.theme-pixel-arcade .session-child-session.active {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+body.theme-pixel-arcade .session-child-open {
+  border: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+body.theme-pixel-arcade .session-child-session:hover .session-child-open,
+body.theme-pixel-arcade .session-child-session:focus-within .session-child-open {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+body.theme-pixel-arcade .session-child-session.active .session-child-open {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 3px 3px 0 var(--pixel-shadow);
+}
+body.theme-pixel-arcade .sidebar-toggle:hover,
+body.theme-pixel-arcade .sidebar-theme-button:hover,
+body.theme-pixel-arcade .sidebar-nav-item:hover,
+body.theme-pixel-arcade .task-group-item:hover,
+body.theme-pixel-arcade .session-child-open:hover,
+body.theme-pixel-arcade .session-file-copy:hover {
+  transform: none;
+  box-shadow: none;
+}
+/* 标题上的操作键采用 absolute + translateY(-50%) 居中，不能被通用按键 transform 覆盖。 */
+body.theme-pixel-arcade button.session-new-child:hover,
+body.theme-pixel-arcade button.session-remove-task:hover,
+body.theme-pixel-arcade button.session-child-delete:hover {
+  transform: translateY(-50%);
+  box-shadow: none;
+}
+body.theme-pixel-arcade button.session-new-child:active:not(:disabled),
+body.theme-pixel-arcade button.session-remove-task:active:not(:disabled),
+body.theme-pixel-arcade button.session-child-delete:active:not(:disabled) {
+  transform: translateY(-50%) translate(2px, 2px);
+  box-shadow: none;
+}
 
 /* 蓝图工程：工程制图网格、标注线和冷静的蓝色层次。 */
 body.theme-blueprint {
@@ -1512,59 +1785,61 @@ body.theme-newspaper {
   --wash-blue: #e1e8f0;
   --wash-purple: #ebe1ee;
   --wash-gray: #e9e5dc;
-  font-family: "KaiTi", "楷体", "STKaiti", Georgia, "Songti SC", serif;
+  font-family: "KaiTi", "楷体", "Kaiti SC", "STKaiti", Georgia, "Songti SC", serif;
   letter-spacing: .01em;
 }
 body.theme-newspaper.theme-dark {
   color-scheme: dark;
-  --bg: #1c1b19;
-  --surface: #28251f;
-  --surface-raised: #332f28;
-  --surface-muted: #3d382f;
-  --line: #756a58;
-  --line-strong: #eadcc3;
-  --ink: #f3ead8;
-  --muted: #c0b39b;
-  --accent: #d18a72;
-  --accent-strong: #efab8b;
-  --accent-soft: #49342e;
-  --teal: #83b7ac;
-  --terminal: #1c1b19;
-  --danger: #f0a090;
-  --wash-red: #472d2a;
-  --wash-orange: #493b29;
-  --wash-yellow: #494327;
-  --wash-green: #294031;
-  --wash-cyan: #27413d;
-  --wash-blue: #2b3a47;
-  --wash-purple: #3f3044;
-  --wash-gray: #37332b;
+  /* 深色报纸：炭黑油墨、旧纸米色和低饱和印刷色，避免霓虹感。 */
+  --bg: #171716;
+  --surface: #211f1c;
+  --surface-raised: #2b2924;
+  --surface-muted: #37332c;
+  --line: #615b50;
+  --line-strong: #d8cdb6;
+  --ink: #eee6d5;
+  --muted: #b3a995;
+  --accent: #c5a56f;
+  --accent-strong: #e0c28d;
+  --accent-soft: #443a2b;
+  --teal: #9baea4;
+  --terminal: #171716;
+  --danger: #c98972;
+  --wash-red: #40302d;
+  --wash-orange: #40372b;
+  --wash-yellow: #433b29;
+  --wash-green: #30382f;
+  --wash-cyan: #2f3936;
+  --wash-blue: #30363a;
+  --wash-purple: #393238;
+  --wash-gray: #34312c;
 }
 @media (prefers-color-scheme: dark) {
   body.theme-newspaper:not(.theme-light) {
     color-scheme: dark;
-    --bg: #1c1b19;
-    --surface: #28251f;
-    --surface-raised: #332f28;
-    --surface-muted: #3d382f;
-    --line: #756a58;
-    --line-strong: #eadcc3;
-    --ink: #f3ead8;
-    --muted: #c0b39b;
-    --accent: #d18a72;
-    --accent-strong: #efab8b;
-    --accent-soft: #49342e;
-    --teal: #83b7ac;
-    --terminal: #1c1b19;
-    --danger: #f0a090;
-    --wash-red: #472d2a;
-    --wash-orange: #493b29;
-    --wash-yellow: #494327;
-    --wash-green: #294031;
-    --wash-cyan: #27413d;
-    --wash-blue: #2b3a47;
-    --wash-purple: #3f3044;
-    --wash-gray: #37332b;
+    /* 跟随系统进入暗色时使用与手动暗色相同的报纸色板。 */
+    --bg: #171716;
+    --surface: #211f1c;
+    --surface-raised: #2b2924;
+    --surface-muted: #37332c;
+    --line: #615b50;
+    --line-strong: #d8cdb6;
+    --ink: #eee6d5;
+    --muted: #b3a995;
+    --accent: #c5a56f;
+    --accent-strong: #e0c28d;
+    --accent-soft: #443a2b;
+    --teal: #9baea4;
+    --terminal: #171716;
+    --danger: #c98972;
+    --wash-red: #40302d;
+    --wash-orange: #40372b;
+    --wash-yellow: #433b29;
+    --wash-green: #30382f;
+    --wash-cyan: #2f3936;
+    --wash-blue: #30363a;
+    --wash-purple: #393238;
+    --wash-gray: #34312c;
   }
 }
 body.theme-newspaper #workspace-main { background-image: repeating-linear-gradient(0deg, color-mix(in srgb, var(--line-strong) 10%, transparent) 0 1px, transparent 1px 28px); background-size: 100% 28px; }
@@ -1745,23 +2020,33 @@ body.theme-newspaper .card.custom-color { background: color-mix(in srgb, var(--t
 body.theme-pixel-arcade.theme-dark,
 body.theme-blueprint.theme-dark,
 body.theme-aurora.theme-dark,
-body.theme-newspaper.theme-dark,
 body.theme-dopamine.theme-dark {
   --status-todo: #f5c451;
   --status-running: #6edbd5;
   --status-done: #83d995;
   --status-archived: #b8b1a0;
 }
+body.theme-newspaper.theme-dark {
+  --status-todo: #d1b56e;
+  --status-running: #a5b4a8;
+  --status-done: #ded5bd;
+  --status-archived: #9c9588;
+}
 @media (prefers-color-scheme: dark) {
   body.theme-pixel-arcade:not(.theme-light),
   body.theme-blueprint:not(.theme-light),
   body.theme-aurora:not(.theme-light),
-  body.theme-newspaper:not(.theme-light),
   body.theme-dopamine:not(.theme-light) {
     --status-todo: #f5c451;
     --status-running: #6edbd5;
     --status-done: #83d995;
     --status-archived: #b8b1a0;
+  }
+  body.theme-newspaper:not(.theme-light) {
+    --status-todo: #d1b56e;
+    --status-running: #a5b4a8;
+    --status-done: #ded5bd;
+    --status-archived: #9c9588;
   }
 }
 
@@ -1851,14 +2136,14 @@ body.theme-newspaper .brand-copy strong,
 body.theme-newspaper .toolbar-intro h1,
 body.theme-newspaper .card-title,
 body.theme-newspaper .session-title-button,
-body.theme-newspaper .modal h2 { font-family: "KaiTi", "楷体", "STKaiti", Georgia, "Songti SC", serif; font-weight: 600; }
+body.theme-newspaper .modal h2 { font-family: "KaiTi", "楷体", "Kaiti SC", "STKaiti", Georgia, "Songti SC", serif; font-weight: 600; }
 body.theme-newspaper .section-kicker,
 body.theme-newspaper .local-status,
 body.theme-newspaper .task-folder,
 body.theme-newspaper .task-stats,
-body.theme-newspaper .session-file-path { font-family: "KaiTi", "楷体", "STKaiti", Georgia, serif; letter-spacing: .045em; }
+body.theme-newspaper .session-file-path { font-family: "KaiTi", "楷体", "Kaiti SC", "STKaiti", Georgia, serif; letter-spacing: .045em; }
 body.theme-newspaper .chip,
-body.theme-newspaper .badge { font-family: "KaiTi", "楷体", "STKaiti", Georgia, serif; }
+body.theme-newspaper .badge { font-family: "KaiTi", "楷体", "Kaiti SC", "STKaiti", Georgia, serif; }
 
 @media (prefers-reduced-motion: reduce) {
   #app-sidebar { transition-duration: .01ms; }
@@ -1886,17 +2171,17 @@ body.theme-newspaper .badge { background: var(--surface-raised); color: var(--in
 body.theme-newspaper.theme-dark .chip,
 body.theme-newspaper.theme-dark .badge { background: var(--surface-muted); color: var(--ink); }
 body.theme-newspaper.theme-dark {
-  --status-todo: #cfcfc5;
-  --status-running: #bdbdb5;
-  --status-done: #f0f0e8;
-  --status-archived: #92928b;
+  --status-todo: #d1b56e;
+  --status-running: #a5b4a8;
+  --status-done: #ded5bd;
+  --status-archived: #9c9588;
 }
 @media (prefers-color-scheme: dark) {
   body.theme-newspaper:not(.theme-light) {
-    --status-todo: #e8c46a;
-    --status-running: #8dc8c0;
-    --status-done: #a7d49d;
-    --status-archived: #9f9585;
+    --status-todo: #d1b56e;
+    --status-running: #a5b4a8;
+    --status-done: #ded5bd;
+    --status-archived: #9c9588;
   }
 }
 
@@ -1912,7 +2197,7 @@ body.theme-newspaper .session-context-icon {
 }
 body.theme-newspaper .brand-mark { width: 34px; height: 34px; font-size: 22px; }
 body.theme-newspaper .session-context-icon { width: 29px; height: 29px; font-size: 18px; }
-body.theme-newspaper .brand-copy strong { font-family: "KaiTi", "楷体", "STKaiti", serif !important; }
+body.theme-newspaper .brand-copy strong { font-family: "KaiTi", "楷体", "Kaiti SC", "STKaiti", serif !important; }
 body.theme-newspaper.theme-light .sidebar-action,
 body.theme-newspaper.theme-light .sidebar-action:hover { background: #57534b; border-color: #3f3c37; color: #fffdf7; }
 @media (prefers-color-scheme: light) {
@@ -1920,10 +2205,10 @@ body.theme-newspaper.theme-light .sidebar-action:hover { background: #57534b; bo
   body.theme-newspaper:not(.theme-dark) .sidebar-action:hover { background: #57534b; border-color: #3f3c37; color: #fffdf7; }
 }
 body.theme-newspaper.theme-dark .sidebar-action,
-body.theme-newspaper.theme-dark .sidebar-action:hover { background: #b27f69; border-color: #d0a18d; color: #2c211c; }
+body.theme-newspaper.theme-dark .sidebar-action:hover { background: var(--accent); border-color: var(--accent-strong); color: var(--bg); }
 @media (prefers-color-scheme: dark) {
   body.theme-newspaper:not(.theme-light) .sidebar-action,
-  body.theme-newspaper:not(.theme-light) .sidebar-action:hover { background: #b27f69; border-color: #d0a18d; color: #2c211c; }
+  body.theme-newspaper:not(.theme-light) .sidebar-action:hover { background: var(--accent); border-color: var(--accent-strong); color: var(--bg); }
 }
 body.theme-newspaper button,
 body.theme-newspaper input,
@@ -1933,13 +2218,13 @@ body.theme-newspaper .card-title,
 body.theme-newspaper .toolbar-intro h1,
 body.theme-newspaper .session-title-button,
 body.theme-newspaper .modal h2 {
-  font-family: "KaiTi", "楷体", "STKaiti", Georgia, "Songti SC", serif;
+  font-family: "KaiTi", "楷体", "Kaiti SC", "STKaiti", Georgia, "Songti SC", serif;
 }
 body.theme-newspaper.theme-dark {
-  --status-todo: #e8c46a;
-  --status-running: #8dc8c0;
-  --status-done: #a7d49d;
-  --status-archived: #9f9585;
+  --status-todo: #d1b56e;
+  --status-running: #a5b4a8;
+  --status-done: #ded5bd;
+  --status-archived: #9c9588;
 }
 
 /* 音乐主题：像一张演出海报，午夜舞台底色、深海蓝和现场青色灯光。 */
@@ -2078,10 +2363,10 @@ body.theme-music .session-description-panel { border-radius: 12px; }
 body.theme-music button { box-shadow: 0 3px 0 color-mix(in srgb, var(--accent-strong) 28%, transparent); }
 body.theme-music button:active { transform: translateY(1px); }
 body.theme-music .sidebar-action,
-body.theme-music .primary { background: linear-gradient(135deg, var(--accent-strong), var(--accent)) !important; border-color: transparent !important; color: #fff8fc !important; box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 24%, transparent); }
+body.theme-music .primary { background: linear-gradient(135deg, var(--accent-strong), var(--accent)) !important; border-color: transparent !important; color: #fff8fc !important; box-shadow: none; }
 body.theme-music .sidebar-action:hover,
 body.theme-music .primary:hover { background: linear-gradient(135deg, var(--accent), var(--teal)) !important; }
-body.theme-music .card { border-left: 4px solid color-mix(in srgb, var(--accent) 72%, var(--teal)); box-shadow: var(--shadow); }
+body.theme-music .card { box-shadow: var(--shadow); }
 body.theme-music .card:hover { transform: translateY(-3px); box-shadow: 0 18px 34px color-mix(in srgb, var(--accent) 18%, transparent); }
 body.theme-music .task-board-column { background: color-mix(in srgb, var(--surface) 78%, transparent); box-shadow: var(--shadow); }
 body.theme-music .sidebar-nav-item.active,
@@ -2090,4 +2375,439 @@ body.theme-music .chip,
 body.theme-music .badge { border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line)); box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 10%, transparent); }
 body.theme-music .theme-menu { border-color: var(--accent); box-shadow: 0 18px 36px color-mix(in srgb, var(--accent) 16%, transparent); }
 body.theme-music .theme-menu-option { border-radius: 8px; }
+/* 舞台感留给卡片与面板，按键保持平面，避免每个操作都像悬浮物。 */
+body.theme-music button { box-shadow: none; }
+/* 看板标题下的节拍刻度与终端上缘的音序器轨道，共同提示这是“正在编排”的工作台。 */
+body.theme-music .task-board-head {
+  padding-bottom: 13px;
+  background-image: repeating-linear-gradient(90deg, var(--accent) 0 2px, transparent 2px 8px, var(--teal) 8px 10px, transparent 10px 16px);
+  background-repeat: repeat-x;
+  background-position: left bottom;
+  background-size: 64px 2px;
+}
+body.theme-music .task-board-head > b {
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  background: color-mix(in srgb, var(--accent) 11%, var(--surface-raised));
+  color: var(--accent-strong);
+}
+body.theme-music .session-terminal { border-top: 2px solid color-mix(in srgb, var(--accent) 58%, var(--teal)); }
+body.theme-music .session-terminal::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 9px, var(--teal) 9px 11px, transparent 11px 18px);
+  opacity: .78;
+  pointer-events: none;
+}
 body.theme-music .sidebar-header { border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+
+/* 各主题的任务状态色板：状态需要有自己的语义，同时服从主题的色相和材质。 */
+body.theme-classic {
+  --status-todo: #a45a12;
+  --status-running: #078c86;
+  --status-done: #2f855a;
+  --status-archived: #6f7f85;
+}
+body.theme-geek {
+  --status-todo: #a16207;
+  --status-running: #078c86;
+  --status-done: #2f855a;
+  --status-archived: #66756e;
+}
+body.theme-pixel-arcade {
+  --status-todo: #b7791f;
+  --status-running: #147f8c;
+  --status-done: #3e8f48;
+  --status-archived: #6b5ca5;
+}
+body.theme-blueprint {
+  --status-todo: #9a6700;
+  --status-running: #086788;
+  --status-done: #27834c;
+  --status-archived: #627783;
+}
+body.theme-aurora {
+  --status-todo: #7c3aed;
+  --status-running: #0e8fd0;
+  --status-done: #2f9e72;
+  --status-archived: #796f9b;
+}
+body.theme-newspaper {
+  --status-todo: #8b6a2e;
+  --status-running: #527a73;
+  --status-done: #4b6f58;
+  --status-archived: #77736a;
+}
+body.theme-music {
+  --status-todo: #b47a13;
+  --status-running: #2c80b6;
+  --status-done: #4f9b73;
+  --status-archived: #6d7fa0;
+}
+
+body.theme-classic.theme-dark,
+body.theme-geek.theme-dark,
+body.theme-pixel-arcade.theme-dark,
+body.theme-blueprint.theme-dark,
+body.theme-aurora.theme-dark,
+body.theme-newspaper.theme-dark,
+body.theme-music.theme-dark {
+  --status-todo: #f2c66d;
+  --status-running: #61d3d5;
+  --status-done: #8fdb9e;
+  --status-archived: #a7aeb0;
+}
+body.theme-classic.theme-dark {
+  --status-todo: #f0a35b;
+  --status-running: #62d8ce;
+  --status-done: #8fdb9e;
+  --status-archived: #9aa9a6;
+}
+body.theme-geek.theme-dark {
+  --status-todo: #facc15;
+  --status-running: #5eead4;
+  --status-done: #4ade80;
+  --status-archived: #91a69b;
+}
+body.theme-pixel-arcade.theme-dark {
+  --status-todo: #f6d365;
+  --status-running: #56d8d5;
+  --status-done: #7bdc7d;
+  --status-archived: #c19ae8;
+}
+body.theme-blueprint.theme-dark {
+  --status-todo: #f0c86a;
+  --status-running: #67d8d1;
+  --status-done: #7dd3a0;
+  --status-archived: #9eb3bf;
+}
+body.theme-aurora.theme-dark {
+  --status-todo: #d5b8ff;
+  --status-running: #67e8f9;
+  --status-done: #8fe0bd;
+  --status-archived: #aaa1c8;
+}
+body.theme-newspaper.theme-dark {
+  --status-todo: #d1b56e;
+  --status-running: #a5b4a8;
+  --status-done: #ded5bd;
+  --status-archived: #9c9588;
+}
+body.theme-music.theme-dark {
+  --status-todo: #f2c66d;
+  --status-running: #61d3d5;
+  --status-done: #9bdfa9;
+  --status-archived: #b4c1d7;
+}
+@media (prefers-color-scheme: dark) {
+  body.theme-classic:not(.theme-light),
+  body.theme-geek:not(.theme-light),
+  body.theme-pixel-arcade:not(.theme-light),
+  body.theme-blueprint:not(.theme-light),
+  body.theme-aurora:not(.theme-light),
+  body.theme-newspaper:not(.theme-light),
+  body.theme-music:not(.theme-light) {
+    --status-todo: #f2c66d;
+    --status-running: #61d3d5;
+    --status-done: #8fdb9e;
+    --status-archived: #a7aeb0;
+  }
+  body.theme-classic:not(.theme-light) {
+    --status-todo: #f0a35b;
+    --status-running: #62d8ce;
+    --status-done: #8fdb9e;
+    --status-archived: #9aa9a6;
+  }
+  body.theme-geek:not(.theme-light) {
+    --status-todo: #facc15;
+    --status-running: #5eead4;
+    --status-done: #4ade80;
+    --status-archived: #91a69b;
+  }
+  body.theme-pixel-arcade:not(.theme-light) {
+    --status-todo: #f6d365;
+    --status-running: #56d8d5;
+    --status-done: #7bdc7d;
+    --status-archived: #c19ae8;
+  }
+  body.theme-blueprint:not(.theme-light) {
+    --status-todo: #f0c86a;
+    --status-running: #67d8d1;
+    --status-done: #7dd3a0;
+    --status-archived: #9eb3bf;
+  }
+  body.theme-aurora:not(.theme-light) {
+    --status-todo: #d5b8ff;
+    --status-running: #67e8f9;
+    --status-done: #8fe0bd;
+    --status-archived: #aaa1c8;
+  }
+  body.theme-newspaper:not(.theme-light) {
+    --status-todo: #d1b56e;
+    --status-running: #a5b4a8;
+    --status-done: #ded5bd;
+    --status-archived: #9c9588;
+  }
+  body.theme-music:not(.theme-light) {
+    --status-todo: #f2c66d;
+    --status-running: #61d3d5;
+    --status-done: #9bdfa9;
+    --status-archived: #b4c1d7;
+  }
+}
+
+/* 覆盖主题对徽章的中性/强调色规则，保证四种状态在浅色和深色下都能辨认。 */
+body.theme-classic .chip.todo, body.theme-classic .badge.todo,
+body.theme-geek .chip.todo, body.theme-geek .badge.todo,
+body.theme-pixel-arcade .chip.todo, body.theme-pixel-arcade .badge.todo,
+body.theme-blueprint .chip.todo, body.theme-blueprint .badge.todo,
+body.theme-aurora .chip.todo, body.theme-aurora .badge.todo,
+body.theme-newspaper .chip.todo, body.theme-newspaper .badge.todo,
+body.theme-music .chip.todo, body.theme-music .badge.todo {
+  background: color-mix(in srgb, var(--status-todo) 18%, var(--surface));
+  color: var(--status-todo);
+}
+body.theme-classic .chip.running, body.theme-classic .badge.running,
+body.theme-geek .chip.running, body.theme-geek .badge.running,
+body.theme-pixel-arcade .chip.running, body.theme-pixel-arcade .badge.running,
+body.theme-blueprint .chip.running, body.theme-blueprint .badge.running,
+body.theme-aurora .chip.running, body.theme-aurora .badge.running,
+body.theme-newspaper .chip.running, body.theme-newspaper .badge.running,
+body.theme-music .chip.running, body.theme-music .badge.running {
+  background: color-mix(in srgb, var(--status-running) 18%, var(--surface));
+  color: var(--status-running);
+}
+body.theme-classic .chip.done, body.theme-classic .badge.done,
+body.theme-geek .chip.done, body.theme-geek .badge.done,
+body.theme-pixel-arcade .chip.done, body.theme-pixel-arcade .badge.done,
+body.theme-blueprint .chip.done, body.theme-blueprint .badge.done,
+body.theme-aurora .chip.done, body.theme-aurora .badge.done,
+body.theme-newspaper .chip.done, body.theme-newspaper .badge.done,
+body.theme-music .chip.done, body.theme-music .badge.done {
+  background: color-mix(in srgb, var(--status-done) 18%, var(--surface));
+  color: var(--status-done);
+}
+body.theme-classic .chip.archived, body.theme-classic .badge.archived,
+body.theme-geek .chip.archived, body.theme-geek .badge.archived,
+body.theme-pixel-arcade .chip.archived, body.theme-pixel-arcade .badge.archived,
+body.theme-blueprint .chip.archived, body.theme-blueprint .badge.archived,
+body.theme-aurora .chip.archived, body.theme-aurora .badge.archived,
+body.theme-newspaper .chip.archived, body.theme-newspaper .badge.archived,
+body.theme-music .chip.archived, body.theme-music .badge.archived {
+  background: color-mix(in srgb, var(--status-archived) 18%, var(--surface));
+  color: var(--status-archived);
+}
+
+/* 会话树是工作台的导航器：每种主题用自己的行业物件表达“当前正在操作的会话”。 */
+/* 编辑室：当前会话像纸页边缘的一道蓝绿色铅笔批注。 */
+body.theme-classic .session-task-title {
+  font-family: Georgia, "Songti SC", "Microsoft YaHei UI", sans-serif;
+  font-weight: 600;
+}
+body.theme-classic .session-child-session.active {
+  border-left: 3px solid var(--teal);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--teal) 11%, var(--surface-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--teal) 20%, var(--line));
+}
+body.theme-classic .session-child-session.active .child-dot {
+  border-color: var(--teal);
+  background: var(--teal);
+}
+body.theme-classic .session-header { border-bottom-color: color-mix(in srgb, var(--teal) 32%, var(--line)); }
+
+/* 终端：方形状态灯与左侧命令光标，保持紧凑、可扫读。 */
+body.theme-geek .session-task-heading,
+body.theme-geek .session-task-title,
+body.theme-geek .session-child-session { border-radius: 2px; }
+body.theme-geek .session-task-title { font-weight: 500; }
+body.theme-geek .session-child-session.active {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+body.theme-geek .child-dot { border-radius: 1px; }
+body.theme-geek .session-child-session.active .child-dot { border-color: var(--accent); background: var(--accent); }
+body.theme-geek .session-header { border-bottom: 1px dashed var(--accent); }
+
+/* 蓝图：会话是图纸索引条，当前项以工程蓝定位线标识。 */
+body.theme-blueprint .session-task-heading,
+body.theme-blueprint .session-task-title,
+body.theme-blueprint .session-child-session { border-radius: 0; }
+body.theme-blueprint .session-task-heading { border-bottom: 1px dashed var(--line); }
+body.theme-blueprint .session-child-session.active {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  box-shadow: inset 1px 0 0 var(--accent);
+}
+body.theme-blueprint .child-dot { border-radius: 0; }
+body.theme-blueprint .session-child-session.active .child-dot { border-color: var(--accent); background: var(--accent); }
+body.theme-blueprint .session-header { border-bottom: 1px dashed var(--accent); }
+
+/* 极光：唯一的高光留给当前会话，像一片浮在玻璃上的极光。 */
+body.theme-aurora .session-child-session.active {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 20%, var(--surface-raised)), color-mix(in srgb, var(--teal) 12%, var(--surface-raised)));
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+body.theme-aurora .session-child-session.active .child-dot {
+  border-color: var(--teal);
+  background: var(--teal);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--teal) 70%, transparent);
+}
+body.theme-aurora .session-header { border-bottom-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+
+/* 报刊：不用色块抢版面，以栏目规则和实心铅字圆点标出正在编辑的稿件。 */
+body.theme-newspaper .session-task-heading,
+body.theme-newspaper .session-task-title,
+body.theme-newspaper .session-child-session { border-radius: 0; }
+body.theme-newspaper .session-task-heading { border-bottom: 1px solid var(--line); }
+body.theme-newspaper .session-child-session.active {
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  border-left: 3px solid var(--line-strong);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+}
+body.theme-newspaper .session-child-session.active .child-dot {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+body.theme-newspaper .session-header { border-bottom: 3px double var(--line-strong); }
+
+/* 音乐：当前会话是 setlist 里正在播放的一轨，左侧灯条和圆点承担“播放中”提示。 */
+body.theme-music .session-child-session.active {
+  border-left: 4px solid var(--teal);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 18%, var(--surface-raised)), var(--surface-raised));
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+body.theme-music .session-child-session.active .child-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+body.theme-music .session-task-title { font-weight: 700; }
+body.theme-music .session-header { border-bottom: 2px solid color-mix(in srgb, var(--accent) 42%, var(--teal)); }
+
+/* 多巴胺：让当前项像贴在面板上的标签，其余行仍保持安静。 */
+body.theme-dopamine .session-child-session.active {
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(100deg, var(--accent-soft), color-mix(in srgb, var(--teal) 15%, var(--surface-raised)));
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+body.theme-dopamine .session-child-session.active .child-dot { border-color: var(--accent); background: var(--accent); }
+
+/* 报纸分类不是整页染色，而是版块栏目的印刷腰封：纸面保持安静，色彩只承担导航。 */
+body.theme-newspaper .card.color-red { --newspaper-section-ink: #a3332f; }
+body.theme-newspaper .card.color-orange { --newspaper-section-ink: #ab6a24; }
+body.theme-newspaper .card.color-yellow { --newspaper-section-ink: #967518; }
+body.theme-newspaper .card.color-green { --newspaper-section-ink: #39704b; }
+body.theme-newspaper .card.color-cyan { --newspaper-section-ink: #3e6d68; }
+body.theme-newspaper .card.color-blue { --newspaper-section-ink: #385d82; }
+body.theme-newspaper .card.color-purple { --newspaper-section-ink: #78506f; }
+body.theme-newspaper .card.color-gray { --newspaper-section-ink: #6d6b63; }
+body.theme-newspaper .card.custom-color { --newspaper-section-ink: var(--task-color); }
+body.theme-newspaper .card[class*="color-"],
+body.theme-newspaper .card.custom-color { background: var(--surface-raised); }
+body.theme-newspaper .card[class*="color-"] .card-head,
+body.theme-newspaper .card.custom-color .card-head {
+  border-radius: 0;
+  background: color-mix(in srgb, var(--newspaper-section-ink) 13%, var(--surface-raised));
+  box-shadow: inset 5px 0 0 var(--newspaper-section-ink);
+}
+body.theme-newspaper .card[class*="color-"] .card-head { border-bottom-color: color-mix(in srgb, var(--newspaper-section-ink) 36%, var(--line)); }
+body.theme-newspaper.theme-dark .card.color-red { --newspaper-section-ink: #c98972; }
+body.theme-newspaper.theme-dark .card.color-orange { --newspaper-section-ink: #c49a68; }
+body.theme-newspaper.theme-dark .card.color-yellow { --newspaper-section-ink: #d1b56e; }
+body.theme-newspaper.theme-dark .card.color-green { --newspaper-section-ink: #9bad91; }
+body.theme-newspaper.theme-dark .card.color-cyan { --newspaper-section-ink: #9baea4; }
+body.theme-newspaper.theme-dark .card.color-blue { --newspaper-section-ink: #9aafba; }
+body.theme-newspaper.theme-dark .card.color-purple { --newspaper-section-ink: #b99bad; }
+body.theme-newspaper.theme-dark .card.color-gray { --newspaper-section-ink: #aaa293; }
+@media (prefers-color-scheme: dark) {
+  body.theme-newspaper:not(.theme-light) .card.color-red { --newspaper-section-ink: #c98972; }
+  body.theme-newspaper:not(.theme-light) .card.color-orange { --newspaper-section-ink: #c49a68; }
+  body.theme-newspaper:not(.theme-light) .card.color-yellow { --newspaper-section-ink: #d1b56e; }
+  body.theme-newspaper:not(.theme-light) .card.color-green { --newspaper-section-ink: #9bad91; }
+  body.theme-newspaper:not(.theme-light) .card.color-cyan { --newspaper-section-ink: #9baea4; }
+  body.theme-newspaper:not(.theme-light) .card.color-blue { --newspaper-section-ink: #9aafba; }
+  body.theme-newspaper:not(.theme-light) .card.color-purple { --newspaper-section-ink: #b99bad; }
+  body.theme-newspaper:not(.theme-light) .card.color-gray { --newspaper-section-ink: #aaa293; }
+}
+
+/* 其他主题沿用报纸的分类层级：色彩标注栏目，而不接管整张任务卡片。 */
+body:not(.theme-newspaper) .card.color-red { --category-section-ink: color-mix(in srgb, #d24c4c 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-orange { --category-section-ink: color-mix(in srgb, #d97725 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-yellow { --category-section-ink: color-mix(in srgb, #b58c16 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-green { --category-section-ink: color-mix(in srgb, #398c5a 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-cyan { --category-section-ink: color-mix(in srgb, #278e9a 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-blue { --category-section-ink: color-mix(in srgb, #4777c8 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-purple { --category-section-ink: color-mix(in srgb, #8a5ac3 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.color-gray { --category-section-ink: color-mix(in srgb, #7f858a 74%, var(--ink)); }
+body:not(.theme-newspaper) .card.custom-color { --category-section-ink: color-mix(in srgb, var(--task-color) 74%, var(--ink)); }
+body:not(.theme-newspaper) .card[class*="color-"],
+body:not(.theme-newspaper) .card.custom-color { background: var(--surface-raised); }
+/* 默认：编辑手稿的页签色，左侧像一笔彩色铅笔批注。 */
+body.theme-classic .card[class*="color-"] .card-head,
+body.theme-classic .card.custom-color .card-head {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--category-section-ink) 13%, var(--surface-raised)), var(--surface-raised) 72%);
+  box-shadow: inset 5px 0 0 var(--category-section-ink);
+}
+body.theme-classic .card[class*="color-"] .card-head { border-bottom-color: color-mix(in srgb, var(--category-section-ink) 30%, var(--line)); }
+/* 极客：终端索引的 ANSI 色标，克制且保持等宽信息密度。 */
+body.theme-geek .card[class*="color-"] .card-head,
+body.theme-geek .card.custom-color .card-head {
+  border-radius: 0;
+  background: var(--surface-raised);
+  box-shadow: inset 3px 0 0 var(--category-section-ink);
+  border-bottom: 1px dashed color-mix(in srgb, var(--category-section-ink) 46%, var(--line));
+}
+/* 街机：卡带标签的硬边色带。 */
+body.theme-pixel-arcade .card[class*="color-"] .card-head,
+body.theme-pixel-arcade .card.custom-color .card-head {
+  border-radius: 0;
+  background: color-mix(in srgb, var(--category-section-ink) 17%, var(--surface-raised));
+  box-shadow: inset 4px 0 0 var(--category-section-ink);
+  border-bottom-color: var(--line-strong);
+}
+/* 蓝图：图纸索引条，色彩只落在左侧定位线和第一段标题底纹。 */
+body.theme-blueprint .card[class*="color-"] .card-head,
+body.theme-blueprint .card.custom-color .card-head {
+  border-radius: 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--category-section-ink) 13%, var(--surface-raised)) 0 54px, var(--surface-raised) 54px);
+  box-shadow: inset 3px 0 0 var(--category-section-ink);
+  border-bottom: 1px dashed color-mix(in srgb, var(--category-section-ink) 48%, var(--line));
+}
+/* 极光：分类色是玻璃中的一层折光，不使用硬色条。 */
+body.theme-aurora .card[class*="color-"] .card-head,
+body.theme-aurora .card.custom-color .card-head {
+  border-radius: inherit;
+  background: linear-gradient(105deg, color-mix(in srgb, var(--category-section-ink) 21%, var(--surface-raised)), var(--surface-raised) 64%);
+  box-shadow: inset 0 0 20px color-mix(in srgb, var(--category-section-ink) 15%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--category-section-ink) 26%, var(--line));
+}
+/* 炫彩：像贴在卡片上的不对称彩色贴纸。 */
+body.theme-dopamine .card[class*="color-"] .card-head,
+body.theme-dopamine .card.custom-color .card-head {
+  border-radius: 15px 6px 0 0;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--category-section-ink) 25%, var(--surface-raised)), color-mix(in srgb, var(--category-section-ink) 8%, var(--surface-raised)));
+  box-shadow: inset 6px 0 0 var(--category-section-ink);
+  border-bottom-color: color-mix(in srgb, var(--category-section-ink) 32%, var(--line));
+}
+/* 音乐：setlist 的曲目 cue，色条下方附一小段节拍刻度。 */
+body.theme-music .card[class*="color-"] .card-head,
+body.theme-music .card.custom-color .card-head {
+  border-radius: 10px 10px 0 0;
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--category-section-ink) 18%, var(--surface-raised)), var(--surface-raised) 68%), repeating-linear-gradient(90deg, var(--category-section-ink) 0 2px, transparent 2px 8px);
+  background-position: center, left bottom;
+  background-size: auto, 48px 2px;
+  background-repeat: no-repeat, repeat-x;
+  box-shadow: inset 4px 0 0 var(--category-section-ink);
+  border-bottom-color: color-mix(in srgb, var(--category-section-ink) 34%, var(--line));
+}

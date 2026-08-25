@@ -2,7 +2,7 @@ import { cost, deadline, esc, number, time } from './ui/format.js';
 import { api } from './ui/api.js';
 import {
   COLORS, STATUS, colorCatalog, customColors, saveCustomColors, state, taskColor,
-  loadLayoutState, saveLayoutState,
+  applyViewSettings, loadLayoutState, saveLayoutState, updateViewSetting,
 } from './ui/state.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -57,9 +57,9 @@ function syncThemeMenu() {
     button.setAttribute('aria-checked', String(active));
   });
 }
-const THEME_STYLES = ['classic', 'geek-terminal', 'pixel-arcade', 'newspaper', 'music'];
-const THEME_CLASS_NAMES = { classic: 'classic', 'geek-terminal': 'geek', 'pixel-arcade': 'pixel-arcade', newspaper: 'newspaper', music: 'music' };
-const THEME_BODY_CLASSES = ['classic', 'geek', 'geek-terminal', 'pixel-arcade', 'newspaper', 'music'];
+const THEME_STYLES = ['classic', 'geek-terminal', 'pixel-arcade', 'blueprint', 'aurora', 'newspaper', 'dopamine', 'music'];
+const THEME_CLASS_NAMES = { classic: 'classic', 'geek-terminal': 'geek', 'pixel-arcade': 'pixel-arcade', blueprint: 'blueprint', aurora: 'aurora', newspaper: 'newspaper', dopamine: 'dopamine', music: 'music' };
+const THEME_BODY_CLASSES = ['classic', 'geek', 'geek-terminal', 'pixel-arcade', 'blueprint', 'aurora', 'newspaper', 'dopamine', 'music'];
 function applyThemeStyle(style) {
   const normalized = style === 'geek' ? 'geek-terminal' : style;
   const selected = THEME_STYLES.includes(normalized) ? normalized : 'classic';
@@ -77,7 +77,10 @@ function applyTheme(theme) {
     classic: { light: '#edf1f2', dark: '#0e191f' },
     'geek-terminal': { light: '#f4f7f5', dark: '#0f1412' },
     'pixel-arcade': { light: '#f7f1de', dark: '#101528' },
-    newspaper: { light: '#f4f4f0', dark: '#1c1b19' },
+    blueprint: { light: '#e7f1f7', dark: '#0b1e2d' },
+    aurora: { light: '#f1f2ff', dark: '#0e1020' },
+    newspaper: { light: '#f4f4f0', dark: '#171716' },
+    dopamine: { light: '#fff4fb', dark: '#17132a' },
     music: { light: '#eef3fb', dark: '#111a2d' },
   };
   const themeColor = themeColors[style][dark ? 'dark' : 'light'];
@@ -113,6 +116,24 @@ function applySidebarCollapsed(collapsed) {
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-expanded', String(!collapsed));
 }
+const SORT_OPTIONS = [
+  { value: 'updated', label: '最近更新', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg>' },
+  { value: 'created', label: '创建时间', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 4v3M16 4v3M4 9.5h16M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/></svg>' },
+  { value: 'deadline', label: '截止时间', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v3M18 4v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11H4V7a2 2 0 0 1 2-2Z"/><path d="M12 12v3l2 1"/></svg>' },
+];
+const BOARD_GROUP_ICONS = {
+  single: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>',
+  status: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>',
+  path: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM3.5 7.5v-1a2 2 0 0 1 2-2h4l2 2h5"/></svg>',
+  color: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="2"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/><circle cx="16" cy="16" r="2"/></svg>',
+};
+function syncSortControl() {
+  const button = $('#sort-toggle');
+  const option = SORT_OPTIONS.find((item) => item.value === state.sort) || SORT_OPTIONS[0];
+  button.innerHTML = option.icon;
+  button.title = `排序：${option.label}（点击切换）`;
+  button.setAttribute('aria-label', button.title);
+}
 function syncCardLayoutControl() {
   const button = $('#board-card-layout');
   const compact = state.boardCardLayout === 'compact';
@@ -124,7 +145,7 @@ function syncCardLayoutControl() {
   button.setAttribute('aria-pressed', String(compact));
 }
 applySidebarCollapsed(state.sidebarCollapsed);
-$('#sort').value = state.sort;
+syncSortControl();
 syncCardLayoutControl();
 $('#search').value = state.search;
 window.addEventListener('resize', () => { syncViewportHeight(); syncMasonryColumns(); syncOverflowTooltips(); });
@@ -256,15 +277,22 @@ function card(task, compact = false) {
   const description = task.description?.trim() ? esc(task.description) : '暂无描述';
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
-  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><span class="card-status-icon ${task.status}" role="img" aria-label="状态：${esc(STATUS[task.status]?.label || '未知')}" title="${esc(STATUS[task.status]?.label || '未知状态')}">${STATUS_ICONS[task.status] || '•'}</span><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
 }
-function syncBoardGroupOptions() {
+function boardGroupOptions() {
   const options = [{ value: 'single', label: '全部' }];
   if (!state.status) options.push({ value: 'status', label: '按状态' });
   options.push({ value: 'path', label: '按路径' }, { value: 'color', label: '按颜色' });
-  if (!options.some((option) => option.value === state.boardGroup)) state.boardGroup = 'single';
-  $('#board-group').innerHTML = options.map((option) => `<option value="${option.value}">${option.label}</option>`).join('');
-  $('#board-group').value = state.boardGroup;
+  return options;
+}
+function syncBoardGroupOptions() {
+  const options = boardGroupOptions();
+  if (!options.some((option) => option.value === state.boardGroup)) updateViewSetting('boardGroup', 'single');
+  const option = options.find((item) => item.value === state.boardGroup) || options[0];
+  const button = $('#board-group-toggle');
+  button.innerHTML = BOARD_GROUP_ICONS[option.value];
+  button.title = `看板分布：${option.label}（点击切换）`;
+  button.setAttribute('aria-label', button.title);
 }
 function boardGroups(tasks) {
   if (state.boardGroup === 'path') {
@@ -286,6 +314,8 @@ function boardGroups(tasks) {
 }
 function renderList() {
   document.body.classList.add('board-mode');
+  syncSortControl();
+  syncCardLayoutControl();
   syncBoardGroupOptions();
   const tasks = visibleTasks();
   const groups = boardGroups(tasks);
@@ -308,13 +338,14 @@ function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
   $('#session-view').classList.toggle('no-session', !task);
   const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
-  const sessionTitle = child?.title || task?.title || '选择一个子会话';
+  const sessionTitle = task?.title || '选择一个子会话';
+  const sessionName = child ? (child.title || '新会话') : '';
   $('#session-title').textContent = sessionTitle;
   $('#session-title').dataset.tooltip = sessionTitle;
   syncOverflowTooltips($('#session-title').parentElement);
   requestAnimationFrame(() => syncOverflowTooltips($('#session-title').parentElement));
-  $('#session-file-path').textContent = child?.sessionFile || '';
-  $('#session-file-path').title = child?.sessionFile || '会话文件路径';
+  $('#session-name').textContent = sessionName;
+  $('#session-name').title = sessionName || '会话名称';
   $('#copy-session-file').disabled = !child?.sessionFile;
   $('#session-title').setAttribute('aria-expanded', String(Boolean(state.sessionDescriptionOpen && task)));
   $('#session-description-text').textContent = task?.description?.trim() || '暂无任务描述';
@@ -368,11 +399,41 @@ async function refresh() {
 }
 
 function terminalFontFamily() {
-  if (document.body.classList.contains('theme-geek')) return '"JetBrains Mono", "DengXian", "等线", "Microsoft YaHei UI", monospace';
-  if (document.body.classList.contains('theme-pixel-arcade')) return '"Courier New", "Cascadia Mono", "FangSong", "仿宋", monospace';
-  if (document.body.classList.contains('theme-newspaper')) return '"Courier New", "KaiTi", "楷体", "Courier Prime", monospace';
-  if (document.body.classList.contains('theme-music')) return '"Cascadia Mono", "JetBrains Mono", "Microsoft YaHei UI", monospace';
-  return 'Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace';
+  const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+  const mac = /mac/i.test(platform);
+  if (document.body.classList.contains('theme-geek')) {
+    return mac
+      ? '"JetBrains Mono", "SFMono-Regular", Menlo, "PingFang SC", monospace'
+      : '"JetBrains Mono", "DengXian", "等线", "Microsoft YaHei UI", monospace';
+  }
+  if (document.body.classList.contains('theme-pixel-arcade')) {
+    return mac
+      ? '"Courier New", "Cascadia Mono", Menlo, "STFangsong", "PingFang SC", monospace'
+      : '"Courier New", "Cascadia Mono", "FangSong", "仿宋", monospace';
+  }
+  if (document.body.classList.contains('theme-blueprint')) {
+    return mac
+      ? '"JetBrains Mono", "SFMono-Regular", Menlo, "PingFang SC", monospace'
+      : '"JetBrains Mono", "Cascadia Mono", "Microsoft YaHei UI", monospace';
+  }
+  if (document.body.classList.contains('theme-aurora')) {
+    return mac
+      ? '"SFMono-Regular", Menlo, "PingFang SC", monospace'
+      : '"Cascadia Mono", "Microsoft YaHei UI", monospace';
+  }
+  if (document.body.classList.contains('theme-newspaper')) {
+    // macOS 使用 Kaiti SC / STKaiti 注册楷体，Windows 则通常使用 KaiTi。
+    const macKaiti = mac ? '"Kaiti SC", "STKaiti", ' : '';
+    return `"Courier New", ${macKaiti}"KaiTi", "楷体", "Courier Prime", monospace`;
+  }
+  if (document.body.classList.contains('theme-dopamine') || document.body.classList.contains('theme-music')) {
+    return mac
+      ? '"Cascadia Mono", "JetBrains Mono", "SFMono-Regular", Menlo, "PingFang SC", monospace'
+      : '"Cascadia Mono", "JetBrains Mono", "Microsoft YaHei UI", monospace';
+  }
+  return mac
+    ? '"SFMono-Regular", Menlo, "PingFang SC", monospace'
+    : 'Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace';
 }
 function terminalTheme() {
   const styles = getComputedStyle(document.body);
@@ -388,9 +449,15 @@ function terminalTheme() {
       ? 'pixel-arcade'
       : document.body.classList.contains('theme-newspaper')
         ? 'newspaper'
-        : document.body.classList.contains('theme-music')
-          ? 'music'
-          : 'classic';
+        : document.body.classList.contains('theme-blueprint')
+          ? 'blueprint'
+          : document.body.classList.contains('theme-aurora')
+            ? 'aurora'
+            : document.body.classList.contains('theme-dopamine')
+              ? 'dopamine'
+              : document.body.classList.contains('theme-music')
+                ? 'music'
+                : 'classic';
   const palettes = {
     classic: {
       light: { black: '#172b36', red: '#c84822', green: '#2f855a', yellow: '#a16207', blue: '#075985', magenta: '#7c3aed', cyan: '#078c86', white: '#fbfcfa' },
@@ -404,9 +471,21 @@ function terminalTheme() {
       light: { black: '#19233a', red: '#d9365e', green: '#3e8f48', yellow: '#b7791f', blue: '#315bb5', magenta: '#8b4cc7', cyan: '#147f8c', white: '#fffdf4' },
       dark: { black: '#101528', red: '#ff6b8a', green: '#7bdc7d', yellow: '#f6d365', blue: '#7aa2f7', magenta: '#d19aff', cyan: '#56d8d5', white: '#f4f1df' },
     },
+    blueprint: {
+      light: { black: '#12344a', red: '#b42318', green: '#2f855a', yellow: '#9a6700', blue: '#075985', magenta: '#6b4c9a', cyan: '#008c95', white: '#f7fcff' },
+      dark: { black: '#0b1e2d', red: '#ff9b8e', green: '#72d6a5', yellow: '#f4ca68', blue: '#7dd3fc', magenta: '#c4b5fd', cyan: '#5eead4', white: '#e2f3fb' },
+    },
+    aurora: {
+      light: { black: '#25213f', red: '#c2415d', green: '#2f855a', yellow: '#a16207', blue: '#0ea5e9', magenta: '#7c3aed', cyan: '#0f8fa5', white: '#ffffff' },
+      dark: { black: '#0e1020', red: '#ff9ba9', green: '#83d995', yellow: '#f5c451', blue: '#82cfff', magenta: '#c4a8ff', cyan: '#67e8f9', white: '#f3efff' },
+    },
     newspaper: {
       light: { black: '#28231d', red: '#a3332f', green: '#39704b', yellow: '#936b12', blue: '#385d82', magenta: '#78506f', cyan: '#3e6d68', white: '#fffaf0' },
-      dark: { black: '#171717', red: '#e27b6d', green: '#8fca91', yellow: '#dfc477', blue: '#92b8d5', magenta: '#c69abb', cyan: '#79b8ad', white: '#f3ead8' },
+      dark: { black: '#171716', red: '#c98972', green: '#9baea4', yellow: '#d1b56e', blue: '#9aafba', magenta: '#b99bad', cyan: '#9baea4', white: '#eee6d5' },
+    },
+    dopamine: {
+      light: { black: '#2a1635', red: '#d52d3f', green: '#27834c', yellow: '#a16207', blue: '#4e72c9', magenta: '#c91f69', cyan: '#00a8c6', white: '#ffffff' },
+      dark: { black: '#17132a', red: '#ff8d98', green: '#83d995', yellow: '#f5c451', blue: '#82aaff', magenta: '#ff91c5', cyan: '#5de5e1', white: '#fff1fc' },
     },
     music: {
       light: { black: '#17243a', red: '#3a74c5', green: '#3f805d', yellow: '#9b6b18', blue: '#24549c', magenta: '#5f6fbd', cyan: '#287f86', white: '#ffffff' },
@@ -771,7 +850,7 @@ function openDeleteTaskModal(task) {
   $('#confirm-archive-task', form).onclick = async () => {
     try {
       await api(`/tasks/${task.id}`, { method: 'DELETE' });
-      closeModal(); state.status = ''; await refresh();
+      closeModal(); state.status = ''; applyViewSettings(); await refresh();
       toast('任务已移入已废弃，15 天内可恢复');
     } catch (error) { toast(error.message, 'error'); }
   };
@@ -946,7 +1025,9 @@ document.addEventListener('click', (event) => {
   }
 });
 $('#copy-session-file').onclick = async () => {
-  const path = $('#session-file-path').textContent;
+  const task = currentTask(state.sessionTask);
+  const session = availableSessions(task).find((item) => item.id === state.sessionSessionId);
+  const path = session?.sessionFile;
   if (!path) return;
   try {
     await navigator.clipboard.writeText(`pi --session "${path}"`);
@@ -985,10 +1066,27 @@ $('#session-tree').ondblclick = (event) => {
   const session = availableSessions(task).find((child) => child.id === item.dataset.sessionId);
   if (task && session) openSessionModal(task, session);
 };
-$('#task-groups').onclick = (event) => { const group = event.target.closest('[data-task-filter]'); if (group) { state.status = group.dataset.taskFilter || ''; renderTaskSidebar(); renderList(); saveLayoutState(); } };
-$('#sort').onchange = (event) => { state.sort = event.target.value; renderList(); saveLayoutState(); };
-$('#board-group').onchange = (event) => { state.boardGroup = event.target.value; renderList(); saveLayoutState(); };
-$('#board-card-layout').onclick = () => { state.boardCardLayout = state.boardCardLayout === 'compact' ? 'single' : 'compact'; syncCardLayoutControl(); renderList(); saveLayoutState(); };
+$('#task-groups').onclick = (event) => {
+  const group = event.target.closest('[data-task-filter]');
+  if (!group) return;
+  state.status = group.dataset.taskFilter || '';
+  applyViewSettings();
+  renderTaskSidebar();
+  renderList();
+  saveLayoutState();
+};
+$('#sort-toggle').onclick = () => {
+  const index = SORT_OPTIONS.findIndex((option) => option.value === state.sort);
+  updateViewSetting('sort', SORT_OPTIONS[(index + 1) % SORT_OPTIONS.length].value);
+  syncSortControl(); renderList(); saveLayoutState();
+};
+$('#board-group-toggle').onclick = () => {
+  const options = boardGroupOptions();
+  const index = options.findIndex((option) => option.value === state.boardGroup);
+  updateViewSetting('boardGroup', options[(index + 1) % options.length].value);
+  renderList(); saveLayoutState();
+};
+$('#board-card-layout').onclick = () => { updateViewSetting('boardCardLayout', state.boardCardLayout === 'compact' ? 'single' : 'compact'); syncCardLayoutControl(); renderList(); saveLayoutState(); };
 $('#search').oninput = (event) => { state.search = event.target.value; renderList(); saveLayoutState(); };
 document.addEventListener('keydown', (event) => {
   if ($('.modal') || state.module !== 'tasks') return;
@@ -1009,6 +1107,7 @@ $('#task-list').onclick = async (event) => {
   try {
     if (button.dataset.action === 'clear-filters') {
       state.search = ''; state.status = '';
+      applyViewSettings();
       $('#search').value = '';
       renderTaskSidebar(); renderList(); saveLayoutState();
       $('#search').focus();
@@ -1034,6 +1133,7 @@ $('#task-list').onclick = async (event) => {
     else if (button.dataset.action === 'restore') {
       const result = await api(`/tasks/${task.id}/restore`, { method: 'POST' });
       state.status = '';
+      applyViewSettings();
       await refresh();
       const restoredLabel = STATUS[result.task?.status]?.label || '已恢复';
       toast(`任务已恢复到${restoredLabel}`);
