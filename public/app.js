@@ -22,6 +22,8 @@ let terminalImeCursorHandler = null;
 let terminalCursorSubscription = null;
 let tuiOpening = null;
 let modalRestoreFocus = null;
+const seenSessionMessageIds = new Map();
+const readRequests = new Map();
 
 function hiddenWorkingDirs() {
   try { const parsed = JSON.parse(localStorage.getItem('workbench-hidden-working-dirs') || '[]'); if (Array.isArray(parsed)) return parsed; } catch { /* ignore malformed browser data */ }
@@ -165,6 +167,12 @@ function toast(message, type = '') {
   schedule();
 }
 function currentTask(id) { return state.tasks.find((task) => task.id === id); }
+function sessionMarkerKey(taskId, sessionId) { return `${taskId}\u0000${sessionId}`; }
+function rememberCurrentSessionMessage() {
+  if (state.module !== 'session' || document.visibilityState !== 'visible' || !state.sessionTask || !state.sessionSessionId) return;
+  const session = currentTask(state.sessionTask)?.sessions?.find((item) => item.id === state.sessionSessionId);
+  if (session?.latestMessageId) seenSessionMessageIds.set(sessionMarkerKey(state.sessionTask, state.sessionSessionId), session.latestMessageId);
+}
 function syncMasonryColumns(root = document) {
   const board = root.querySelector('.task-board');
   if (board && board.clientWidth > 0) {
@@ -179,11 +187,24 @@ function syncMasonryColumns(root = document) {
     list.style.columnCount = String(Math.min(count, maxColumns));
   });
 }
+function nativeTooltip(value) {
+  return String(value || '').split('\n').map((line) => {
+    const chars = [...line];
+    const lines = [];
+    while (chars.length > 32) lines.push(chars.splice(0, 32).join(''));
+    lines.push(chars.join(''));
+    return lines.join('\n');
+  }).join('\n');
+}
 function syncOverflowTooltips(root = document) {
   root.querySelectorAll('[data-tooltip]').forEach((node) => {
-    node.title = node.scrollWidth > node.clientWidth || node.scrollHeight > node.clientHeight + 1 ? node.dataset.tooltip : '';
+    const overflowing = node.scrollWidth > node.clientWidth || node.scrollHeight > node.clientHeight + 1;
+    node.title = overflowing ? nativeTooltip(node.dataset.tooltip) : '';
+    node.classList.toggle('is-overflowing', overflowing);
   });
 }
+const overflowTooltipObserver = new MutationObserver(() => requestAnimationFrame(() => syncOverflowTooltips()));
+overflowTooltipObserver.observe(document.body, { childList: true, subtree: true });
 function renderStats() {
   const counts = { todo: 0, running: 0, done: 0 };
   let overdue = 0;
@@ -287,7 +308,11 @@ function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
   $('#session-view').classList.toggle('no-session', !task);
   const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
-  $('#session-title').textContent = child?.title || task?.title || '选择一个子会话';
+  const sessionTitle = child?.title || task?.title || '选择一个子会话';
+  $('#session-title').textContent = sessionTitle;
+  $('#session-title').dataset.tooltip = sessionTitle;
+  syncOverflowTooltips($('#session-title').parentElement);
+  requestAnimationFrame(() => syncOverflowTooltips($('#session-title').parentElement));
   $('#session-file-path').textContent = child?.sessionFile || '';
   $('#session-file-path').title = child?.sessionFile || '会话文件路径';
   $('#copy-session-file').disabled = !child?.sessionFile;
@@ -306,14 +331,16 @@ function renderSessionTree() {
     const colorKey = taskColor(task);
     const customClass = customColors[colorKey] ? ' custom-color' : '';
     const taskAction = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
-    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span>${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-child-name">${esc(title)}</span>${unread ? `<b class="session-unread-count">${unreadLabel}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
+    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span data-tooltip="${esc(task.title)}">${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-child-name" data-tooltip="${esc(title)}">${esc(title)}</span>${unread ? `<b class="session-unread-count">${unreadLabel}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
   }).join('') : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
+  syncOverflowTooltips($('#session-tree'));
 }
 async function refresh() {
   try {
     const data = await api('/tasks');
     const signature = JSON.stringify(data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.stats?.messages, task.stats?.totalTokens]));
     state.tasks = data.tasks;
+    rememberCurrentSessionMessage();
     if (state.sessionTask && !sessionTasks().some((task) => task.id === state.sessionTask)) {
       detachTui();
       state.sessionTask = null;
@@ -535,31 +562,25 @@ async function restartTuiForTheme() {
   await restartCurrentTui('主题已切换，正在重启会话…');
 }
 function selectSession(taskId, sessionId = 'main') {
-  if (state.sessionTask && (state.sessionTask !== taskId || state.sessionSessionId !== sessionId)) leaveCurrentSession();
-  // 重复点击当前子会话不应重启 TUI。
   const task = currentTask(taskId);
   const target = availableSessions(task).find((session) => session.id === sessionId);
+  // 新建任务没有「主会话」；传入的 id 不存在时回退到服务端活跃会话或首个会话
   const nextSessionId = target?.id || task?.activeSessionId || availableSessions(task)[0]?.id || 'main';
-  if (taskId && state.sessionTask === taskId && state.sessionSessionId === nextSessionId && tuiSocket) {
+  const changing = state.sessionTask !== taskId || state.sessionSessionId !== nextSessionId;
+  if (state.sessionTask && changing) leaveCurrentSession();
+  // 重复点击当前子会话不应重启 TUI。
+  if (taskId && !changing && tuiSocket) {
+    rememberCurrentSessionMessage();
     renderSessionTree();
     return;
   }
   detachTui();
   state.sessionTask = taskId || null;
-  // 新建任务没有「主会话」；传入的 id 不存在时回退到服务端活跃会话或首个会话
   state.sessionSessionId = nextSessionId;
-  renderSessionHeader();
-  document.querySelectorAll('#session-tree .session-child-session').forEach((item) => {
-    const active = item.dataset.sessionTask === state.sessionTask && item.dataset.sessionId === state.sessionSessionId;
-    item.classList.toggle('active', active);
-    if (active) {
-      item.querySelector('.session-unread-count')?.remove();
-    }
-  });
+  rememberCurrentSessionMessage();
+  renderSessionTree();
   saveLayoutState();
-  if (taskId) {
-    void openNativeTui();
-  }
+  if (taskId) void openNativeTui();
 }
 
 function modal(html) {
@@ -811,12 +832,23 @@ function openDeleteSessionModal(task, sessionId) {
 }
 function leaveCurrentSession() {
   if (!state.sessionTask || !state.sessionSessionId) return;
-  const session = currentTask(state.sessionTask)?.sessions?.find((item) => item.id === state.sessionSessionId);
   markSessionRead(state.sessionTask, state.sessionSessionId);
 }
-function markSessionRead(taskId, sessionId) {
+function markSessionRead(taskId, sessionId, { keepalive = false } = {}) {
   if (!taskId || !sessionId) return;
-  void api(`/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(() => {});
+  const key = sessionMarkerKey(taskId, sessionId);
+  const readThroughMessageId = seenSessionMessageIds.get(key);
+  if (!readThroughMessageId || readRequests.get(key) === readThroughMessageId) return;
+  readRequests.set(key, readThroughMessageId);
+  void api(`/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/read`, {
+    method: 'POST', keepalive, body: { readThroughMessageId },
+  }).then(() => {
+    if (!keepalive) void refresh();
+  }).catch(() => {
+    // 保留本地旧计数；下次离开会话会重试，避免把失败误显示为已读。
+  }).finally(() => {
+    if (readRequests.get(key) === readThroughMessageId) readRequests.delete(key);
+  });
 }
 function syncModuleTabs() {
   const session = state.module === 'session';
@@ -834,8 +866,10 @@ function switchModule(module) {
   syncModuleTabs();
   $('#task-sidebar').classList.toggle('hidden', session); $('#session-sidebar').classList.toggle('hidden', !session);
   $('#task-toolbar').classList.toggle('hidden', session); $('#task-list').classList.toggle('hidden', session); $('#session-view').classList.toggle('hidden', !session);
-  if (session) renderSessionTree();
-  else renderList();
+  if (session) {
+    rememberCurrentSessionMessage();
+    renderSessionTree();
+  } else renderList();
 }
 
 function closeThemeMenu() {
@@ -928,6 +962,7 @@ $('#session-tree').onclick = (event) => {
     event.stopPropagation();
     state.hiddenCompletedSessionTasks.add(removeCompleted.dataset.removeCompletedTask);
     if (state.sessionTask === removeCompleted.dataset.removeCompletedTask) {
+      leaveCurrentSession();
       detachTui();
       state.sessionTask = null;
       state.sessionSessionId = 'main';
@@ -1009,6 +1044,7 @@ $('#task-list').onclick = async (event) => {
       await api(`/tasks/${task.id}/complete`, { method: 'POST' });
       state.hiddenCompletedSessionTasks.add(task.id);
       if (state.sessionTask === task.id) {
+        leaveCurrentSession();
         detachTui();
         state.sessionTask = null;
         state.sessionSessionId = 'main';
@@ -1031,11 +1067,14 @@ const taskEvents = new EventSource('/api/events');
 taskEvents.onmessage = ({ data }) => {
   try {
     const event = JSON.parse(data);
-    if (event.type === 'tasks_changed' && event.reason !== 'session') scheduleRefresh();
+    if (event.type === 'tasks_changed') scheduleRefresh();
   } catch { /* ignore malformed event */ }
 };
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.module === 'session') void refresh();
+});
 window.addEventListener('pagehide', () => {
-  if (state.sessionTask) markSessionRead(state.sessionTask, state.sessionSessionId);
+  if (state.sessionTask) markSessionRead(state.sessionTask, state.sessionSessionId, { keepalive: true });
   taskEvents.close();
 }, { once: true });
 refresh();

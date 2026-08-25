@@ -9,6 +9,7 @@ import {
   loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, subscribeTasks,
 } from './lib/store.js';
 import { parseSessionFile, extractText } from './lib/session.js';
+import { unreadAssistantMessages, messageTime, sessionUnreadCount, nextReadState } from './lib/unread.js';
 import { killPi } from './lib/executor.js';
 import {
   startWebTui, stopWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
@@ -30,6 +31,7 @@ function saveConfig() {
 const app = express();
 const taskEventClients = new Set();
 const taskEventTimers = new Map();
+const sessionEventTimers = new Map();
 function broadcastTaskEvent(event = {}) {
   const payload = `data: ${JSON.stringify({ type: 'tasks_changed', ...event })}\n\n`;
   for (const client of taskEventClients) {
@@ -44,6 +46,17 @@ function notifyTaskChanged(taskId, reason = 'task') {
     broadcastTaskEvent({ taskId: taskId || null, reason });
   }, 200);
   taskEventTimers.set(key, timer);
+  timer.unref?.();
+}
+// pi 会连续输出多个终端帧；等 JSONL 写入稳定后再通知一次即可。
+function notifySessionChanged(taskId) {
+  if (!taskId) return;
+  clearTimeout(sessionEventTimers.get(taskId));
+  const timer = setTimeout(() => {
+    sessionEventTimers.delete(taskId);
+    broadcastTaskEvent({ taskId, reason: 'session' });
+  }, 300);
+  sessionEventTimers.set(taskId, timer);
   timer.unref?.();
 }
 subscribeTasks(({ taskId }) => notifyTaskChanged(taskId));
@@ -70,28 +83,13 @@ function sessionTitleFromPrompt(text) {
   return title.length > 28 ? `${title.slice(0, 28)}…` : title;
 }
 function assistantMessages(child) {
-  return parseSessionFile(child.sessionFile).entries.filter((entry) => entry.type === 'message' && entry.message?.role === 'assistant');
+  return unreadAssistantMessages(parseSessionFile(child.sessionFile).entries);
 }
-function messageTime(entry) {
-  const value = entry?.message?.timestamp || entry?.timestamp;
-  const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
-  return Number.isFinite(time) && time > 0 ? time : 0;
-}
-function sessionUnreadCount(child) {
-  const messages = assistantMessages(child);
-  if (!messages.length) return 0;
-  const markerIndex = child.lastReadMessageId ? messages.findIndex((entry) => entry.id === child.lastReadMessageId) : -1;
-  const lastReadAt = Number(child.lastReadAt) || new Date(child.lastReadAt || 0).getTime() || 0;
-  return markerIndex >= 0 ? messages.length - markerIndex - 1 : messages.filter((entry) => messageTime(entry) > lastReadAt).length;
-}
-function markSessionRead(task, child) {
+function markSessionRead(task, child, readThroughMessageId) {
   if (!task || !child) return false;
-  const latest = assistantMessages(child).at(-1) || null;
-  const lastReadMessageId = latest?.id || null;
-  const lastReadAt = latest ? (messageTime(latest) || Date.now()) : Date.now();
-  if (child.lastReadMessageId === lastReadMessageId && Number(child.lastReadAt) === lastReadAt) return false;
-  child.lastReadMessageId = lastReadMessageId;
-  child.lastReadAt = lastReadAt;
+  const next = nextReadState(child, assistantMessages(child), readThroughMessageId);
+  if (!next) return false;
+  Object.assign(child, next);
   saveTasks();
   return true;
 }
@@ -115,8 +113,9 @@ function publicSession(child) {
       if (text) { shown = { ...child, title: sessionTitleFromPrompt(text) }; break; }
     }
   }
+  const messages = assistantMessages(child);
   const { lastReadMessageId, lastReadAt, ...safe } = shown;
-  return { ...safe, unreadCount: sessionUnreadCount(child) };
+  return { ...safe, latestMessageId: messages.at(-1)?.id || null, unreadCount: sessionUnreadCount(child, messages) };
 }
 function persistSessionTitle(task, child) {
   if (!child || (child.title && child.title !== '主会话' && child.title !== '新会话')) return;
@@ -216,11 +215,13 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
     title: childSession.title || task.title, provider: task.modelProvider, model: task.model,
     thinkingLevel: task.thinkingLevel, readOnly: task.readOnly, approve: config.approvePi !== false,
     cols, rows, theme: theme === 'dark' ? 'dark' : 'light',
+    onData: () => notifySessionChanged(task.id),
     onExit: () => {
       const current = getTask(task.id);
       if (!current) return;
       const currentSession = resolveTaskSession(current, childSession.id);
       persistSessionTitle(current, currentSession);
+      notifySessionChanged(task.id);
     },
   });
   const current = getTask(task.id);
@@ -333,8 +334,10 @@ app.post('/api/tasks/:id/sessions/:sessionId/read', (req, res) => {
   if (!task) return res.status(404).json({ error: '任务不存在' });
   const session = taskSessions(task).find((item) => item.id === req.params.sessionId);
   if (!session) return res.status(404).json({ error: '子会话不存在' });
-  markSessionRead(task, session);
-  res.json({ ok: true });
+  const readThroughMessageId = typeof req.body?.readThroughMessageId === 'string' ? req.body.readThroughMessageId : null;
+  const changed = markSessionRead(task, session, readThroughMessageId);
+  if (changed) notifySessionChanged(task.id);
+  res.json({ ok: true, session: publicSession(session) });
 });
 app.get('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
@@ -458,10 +461,27 @@ function selectWindowsDirectory(res) {
   const script = [
     '$ErrorActionPreference = "Stop"', '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
     'Add-Type -AssemblyName System.Windows.Forms', '[System.Windows.Forms.Application]::EnableVisualStyles()',
+    // Use the window that was active when the request was made as the dialog owner.
+    // Without an owner, Windows may put the modal dialog behind the browser.
+    `Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+using System;
+using System.Windows.Forms;
+using System.Runtime.InteropServices;
+public sealed class WorkbenchDialogOwner : IWin32Window {
+  private readonly IntPtr handle;
+  public WorkbenchDialogOwner(IntPtr handle) { this.handle = handle; }
+  public IntPtr Handle { get { return handle; } }
+}
+public static class WorkbenchWindowApi {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+'@`,
+    '$ownerHandle = [WorkbenchWindowApi]::GetForegroundWindow()',
+    '$owner = if ($ownerHandle -ne [IntPtr]::Zero) { New-Object -TypeName WorkbenchDialogOwner -ArgumentList $ownerHandle } else { $null }',
     '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog', '$dialog.Description = "选择工作目录"',
-    '$dialog.ShowNewFolderButton = $true', '$result = $dialog.ShowDialog()',
+    '$dialog.ShowNewFolderButton = $true', '$result = if ($owner) { $dialog.ShowDialog($owner) } else { $dialog.ShowDialog() }',
     'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($dialog.SelectedPath) }',
-  ].join('; ');
+  ].join('\n');
   const args = ['-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script];
   const commands = ['powershell.exe', 'pwsh.exe'];
   let index = 0;
