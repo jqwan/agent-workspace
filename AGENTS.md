@@ -17,15 +17,16 @@
 
 ## 领域规则
 
-- 对外任务状态为 `todo`、`running`、`done`、`archived`，界面显示为待办、处理中、已完成、已废弃。
-- 任务状态只允许 `todo`、`running`、`done`、`archived`；历史或未知状态加载时统一归档为 `archived`。
+- 对外任务状态为 `unfinished`、`done`、`archived`，界面显示为未完成、已完成、已废弃；历史 `todo` / `running` 以及未知状态加载时统一迁移为 `unfinished`。
+- 任务状态只允许 `unfinished`、`done`、`archived`；是否有正在运行的 pi TUI 由独立的运行状态判断，不由任务状态表示。
 - 删除任务是软删除：设置 `archived`、`archivedAt` 和 `purgeAt`，15 天后才清理 session 文件和任务记录。
-- 已废弃任务不应出现在全部任务看板中；恢复后回到待办状态。
+- 已废弃任务不应出现在全部任务看板中；恢复后回到未完成状态（如果废弃前为已完成则恢复为已完成）。
 - 任务分类字段是 `color`，有效值为 `red`、`orange`、`yellow`、`green`、`cyan`、`blue`、`purple`、`gray`。不要重新引入 priority/重要程度概念。
-- 新建任务不预建任何会话（`sessions` 为空数组、`sessionFile` 为 null）；点击执行时才创建首个会话（标题「新会话」，随后按首条消息重命名），并把任务级 `sessionFile` 锚定到该会话。
-- 「主会话」只存在于历史数据（由旧 `task.sessionFile` 回填）；没有消息内容的主会话不显示。
+- 新建任务不预建任何会话（`sessions` 为空数组、`sessionFile` 为 null）；点击执行时才创建首个会话（标题「新会话」，随后按首条消息重命名），并把任务级 `sessionFile` 锚定到该会话。删除全部会话后，`sessionFile` 恢复为 null。
+- 历史数据中的旧 `task.sessionFile` 会在迁移时回填为普通子会话；会话可以全部删除，删除后任务保留但没有会话，之后可重新创建。
 - 工作目录只能使用绝对路径或 `~` 路径。使用 `resolveWorkingDir()`；Windows 路径如 `C:\\Users\\name\\project` 必须保持可用。
 - Windows 目录选择器通过 PowerShell，macOS 使用 AppleScript，Linux 使用 `zenity`；修改目录选择逻辑时要保留三平台分支。
+- 任务工作目录始终可编辑；它只作为新会话的默认目录。已有会话以 session JSONL 首行的 `cwd` 为准，保持原工作目录。
 - 主题有系统、浅色、深色三种模式，用户选择保存在 `localStorage`；新增主题样式时必须同时检查系统主题和手动主题覆盖规则。
 - `lib/executor.js` 中的 pi 查找、外部脚本、终端打开和进程查找需要兼容 Windows；不要无条件调用 `which`、`pgrep` 或 `osascript`。
 

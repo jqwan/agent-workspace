@@ -1,6 +1,5 @@
 export const STATUS = {
-  todo: { label: '待办', cls: 'todo' },
-  running: { label: '处理中', cls: 'running' },
+  unfinished: { label: '未完成', cls: 'unfinished' },
   done: { label: '已完成', cls: 'done' },
   archived: { label: '已废弃', cls: 'archived' },
 };
@@ -22,12 +21,16 @@ const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
 
 const VIEW_SETTING_KEYS = ['', ...Object.keys(STATUS)];
 const DEFAULT_VIEW_SETTINGS = { sort: 'updated', boardGroup: 'single', boardCardLayout: 'single' };
+function normalizeViewStatus(value) {
+  if (value === 'todo' || value === 'running' || value === 'unfinished') return 'unfinished';
+  return value === 'done' || value === 'archived' ? value : '';
+}
 
 export const state = {
   tasks: [], status: '', boardGroup: 'single', boardCardLayout: 'single', sort: 'updated', search: '', signature: '',
   viewSettings: Object.fromEntries(VIEW_SETTING_KEYS.map((key) => [key, { ...DEFAULT_VIEW_SETTINGS }])),
-  module: 'tasks', sidebarCollapsed: false, sessionTask: null, sessionSessionId: 'main', sessionDescriptionOpen: false,
-  collapsedSessionTasks: new Set(), hiddenCompletedSessionTasks: new Set(),
+  module: 'tasks', sidebarCollapsed: false, sessionTask: null, sessionSessionId: null,
+  collapsedSessionTasks: new Set(), sessionTaskIds: new Set(), hiddenCompletedSessionTasks: new Set(),
 };
 
 export function applyViewSettings(status = state.status) {
@@ -70,7 +73,8 @@ export function loadLayoutState() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || '{}') || {}; } catch { /* ignore malformed browser data */ }
   if (saved.module === 'tasks' || saved.module === 'session') state.module = saved.module;
-  if (VIEW_SETTING_KEYS.includes(saved.status)) state.status = saved.status;
+  const savedStatus = normalizeViewStatus(saved.status);
+  if (VIEW_SETTING_KEYS.includes(savedStatus)) state.status = savedStatus;
 
   // 将旧版全局设置迁移到“全部任务”和当前分类，避免升级后当前视图突然改变。
   const legacy = {};
@@ -83,12 +87,13 @@ export function loadLayoutState() {
   }
   if (saved.viewSettings && typeof saved.viewSettings === 'object') {
     Object.entries(saved.viewSettings).forEach(([key, value]) => {
-      if (!VIEW_SETTING_KEYS.includes(key) || !value || typeof value !== 'object') return;
-      const settings = { ...state.viewSettings[key] };
+      const normalizedKey = normalizeViewStatus(key);
+      if (!VIEW_SETTING_KEYS.includes(normalizedKey) || !value || typeof value !== 'object') return;
+      const settings = { ...state.viewSettings[normalizedKey] };
       if (['updated', 'created', 'deadline'].includes(value.sort)) settings.sort = value.sort;
       if (['single', 'status', 'path', 'color'].includes(value.boardGroup)) settings.boardGroup = value.boardGroup;
       if (['single', 'compact'].includes(value.boardCardLayout)) settings.boardCardLayout = value.boardCardLayout;
-      state.viewSettings[key] = settings;
+      state.viewSettings[normalizedKey] = settings;
     });
   }
   applyViewSettings();
@@ -97,8 +102,8 @@ export function loadLayoutState() {
   else state.sidebarCollapsed = localStorage.getItem('workbench-sidebar-collapsed') === 'true';
   if (typeof saved.sessionTask === 'string' && saved.sessionTask) state.sessionTask = saved.sessionTask;
   if (typeof saved.sessionSessionId === 'string' && saved.sessionSessionId) state.sessionSessionId = saved.sessionSessionId;
-  if (typeof saved.sessionDescriptionOpen === 'boolean') state.sessionDescriptionOpen = saved.sessionDescriptionOpen;
   if (Array.isArray(saved.collapsedSessionTasks)) state.collapsedSessionTasks = new Set(saved.collapsedSessionTasks.filter((id) => typeof id === 'string'));
+  if (Array.isArray(saved.sessionTaskIds)) state.sessionTaskIds = new Set(saved.sessionTaskIds.filter((id) => typeof id === 'string'));
   if (Array.isArray(saved.hiddenCompletedSessionTasks)) state.hiddenCompletedSessionTasks = new Set(saved.hiddenCompletedSessionTasks.filter((id) => typeof id === 'string'));
 }
 
@@ -109,8 +114,8 @@ export function saveLayoutState() {
       // 保留当前值，便于旧版本工作台继续读取布局状态。
       boardGroup: state.boardGroup, boardCardLayout: state.boardCardLayout, sort: state.sort,
       search: state.search, sidebarCollapsed: state.sidebarCollapsed, sessionTask: state.sessionTask,
-      sessionSessionId: state.sessionSessionId, sessionDescriptionOpen: state.sessionDescriptionOpen,
-      collapsedSessionTasks: [...state.collapsedSessionTasks], hiddenCompletedSessionTasks: [...state.hiddenCompletedSessionTasks],
+      sessionSessionId: state.sessionSessionId,
+      collapsedSessionTasks: [...state.collapsedSessionTasks], sessionTaskIds: [...state.sessionTaskIds], hiddenCompletedSessionTasks: [...state.hiddenCompletedSessionTasks],
     }));
   } catch { /* ignore unavailable browser storage */ }
 }

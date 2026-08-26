@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#edf1f2">
   <title>工作台</title>
-  <link rel="stylesheet" href="style.css?v=studio-152">
+  <link rel="stylesheet" href="style.css?v=studio-166">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
@@ -30,13 +30,13 @@
       <section id="task-list" class="module-view"></section>
       <section id="session-view" class="module-view hidden">
         <div class="session-layout"><div class="session-main">
-          <header class="session-header"><div class="session-context"><span class="session-context-icon" aria-hidden="true">π</span><div class="session-context-copy"><button id="session-title" class="session-title-button" type="button" aria-expanded="false" aria-controls="session-description-panel">选择一个子会话</button><div class="session-file-row"><span id="session-name" class="session-file-path" title="会话名称"></span><button id="copy-session-file" class="session-file-copy" type="button" title="复制 pi 会话命令" aria-label="复制 pi 会话命令">⧉</button></div></div><div id="session-description-panel" class="session-description-panel hidden"><div id="session-description-text"></div></div></div><div class="session-controls"><label class="sr-only" for="session-task-select">选择任务会话</label><select id="session-task-select" name="sessionTask"><option value="">选择会话</option></select><button id="session-restart" class="icon-button" type="button" title="重新连接" aria-label="重新连接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10V4h6M4 4l4 4a8 8 0 1 1-1 10"/></svg></button></div></header>
+          <header class="session-header"><div class="session-context"><span class="session-context-icon" aria-hidden="true">π</span><div id="session-context-copy" class="session-context-copy"><button id="session-title" class="session-title-button" type="button" aria-expanded="false" aria-controls="session-task-details-panel">选择一个子会话</button><div class="session-file-row"><span id="session-name" class="session-file-path" title="会话名称"></span><button id="copy-session-file" class="session-file-copy" type="button" title="复制 pi 会话命令" aria-label="复制 pi 会话命令">⧉</button></div><section id="session-task-details-panel" class="session-description-panel hidden" aria-label="任务详情"><div class="session-detail-row"><span>工作路径</span><code id="session-working-dir"></code></div><div class="session-detail-row"><span>任务描述</span><p id="session-description-text"></p></div></section></div></div><div class="session-controls"><label class="sr-only" for="session-task-select">选择任务会话</label><select id="session-task-select" name="sessionTask"><option value="">选择会话</option></select><button id="session-restart" class="icon-button" type="button" title="重新连接" aria-label="重新连接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10V4h6M4 4l4 4a8 8 0 1 1-1 10"/></svg></button></div></header>
           <div id="session-terminal" class="session-terminal" aria-label="pi 终端"><div class="terminal-empty">从左侧选择一个会话以打开 pi 会话</div></div>
         </div></div>
       </section>
     </main>
   </div>
   <div id="modal-root"></div>
-  <script type="module" src="app.js?v=studio-103"></script>
+  <script type="module" src="app.js?v=studio-116"></script>
 </body>
 </html>

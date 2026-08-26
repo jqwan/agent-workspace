@@ -1,4 +1,4 @@
-import { cost, deadline, esc, number, time } from './ui/format.js';
+import { deadline, esc, number, time } from './ui/format.js';
 import { api } from './ui/api.js';
 import {
   COLORS, STATUS, colorCatalog, customColors, saveCustomColors, state, taskColor,
@@ -28,6 +28,8 @@ let terminalImeComposing = false;
 let terminalImeInputStyle = null;
 let tuiOpening = null;
 let modalRestoreFocus = null;
+let sessionTaskDetailsOpen = false;
+let sessionTaskDetailsCloseTimer = null;
 const seenSessionMessageIds = new Map();
 const readRequests = new Map();
 
@@ -233,13 +235,13 @@ function syncOverflowTooltips(root = document) {
 const overflowTooltipObserver = new MutationObserver(() => requestAnimationFrame(() => syncOverflowTooltips()));
 overflowTooltipObserver.observe(document.body, { childList: true, subtree: true });
 function renderStats() {
-  const counts = { todo: 0, running: 0, done: 0 };
+  const counts = { unfinished: 0, done: 0 };
   let overdue = 0;
   state.tasks.forEach((task) => { if (counts[task.status] !== undefined) counts[task.status]++; if (task.overdue) overdue++; });
-  $('#stats').innerHTML = ['todo', 'running', 'done'].map((key) => `<span class="chip ${STATUS[key].cls}">${STATUS[key].label} ${number(counts[key])}</span>`).join('') + (overdue ? `<span class="chip overdue">逾期 ${number(overdue)}</span>` : '');
+  $('#stats').innerHTML = ['unfinished', 'done'].map((key) => `<span class="chip ${STATUS[key].cls}">${STATUS[key].label} ${number(counts[key])}</span>`).join('') + (overdue ? `<span class="chip overdue">逾期 ${number(overdue)}</span>` : '');
 }
-const GROUP_ICONS = { '': '▦', todo: '○', running: '◐', done: '✓', archived: '✕' };
-const STATUS_ICONS = { todo: '○', running: '◐', done: '✓', archived: '✕' };
+const GROUP_ICONS = { '': '▦', unfinished: '○', done: '✓', archived: '✕' };
+const STATUS_ICONS = { unfinished: '○', done: '✓', archived: '✕' };
 function renderTaskSidebar() {
   $('#task-groups').innerHTML = [{ key: '', label: '全部任务' }, ...Object.entries(STATUS).map(([key, value]) => ({ key, label: value.label }))].map(({ key, label }) => {
     const count = key ? state.tasks.filter((task) => task.status === key).length : state.tasks.filter((task) => task.status !== 'archived').length;
@@ -270,20 +272,20 @@ function actionButton(action, id, label, iconName, className = '') {
 }
 function actions(task) {
   if (task.status === 'archived') return `${actionButton('restore', task.id, '恢复任务', 'restore')}${actionButton('purge', task.id, '永久删除', 'purge', 'danger')}`;
-  if (task.status === 'todo') return `${actionButton('execute', task.id, '打开会话', 'open', 'primary')}${actionButton('complete', task.id, '标记完成', 'complete')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
-  if (task.status === 'running') return `${actionButton('session', task.id, '打开会话', 'open', 'primary')}${actionButton('complete', task.id, '标记完成', 'complete')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
+  if (task.status === 'unfinished') {
+    const openAction = availableSessions(task).length ? 'session' : 'execute';
+    return `${actionButton(openAction, task.id, '打开会话', 'open', 'primary')}${actionButton('complete', task.id, '标记完成', 'complete')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
+  }
   if (task.status === 'done') return `${actionButton('session', task.id, '打开会话', 'open', 'primary')}${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
   return `${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
 }
 function card(task, compact = false) {
-  const stats = task.stats || {};
   const archiveInfo = task.status === 'archived' ? `<div class="archive-info">已废弃 · ${time(task.archivedAt)} · ${task.purgeAt ? `预计 ${time(task.purgeAt)} 自动删除` : ''}</div>` : '';
-  const statHtml = compact ? '' : `<div class="task-stats"><span>会话 ${number(stats.sessions)}</span><span>消息 ${number(stats.messages)}</span><span>输入 ${number(stats.inputTokens)}</span><span>输出 ${number(stats.outputTokens)}</span><span>Token ${number(stats.totalTokens)}</span>${stats.cost ? `<span>成本 ${cost(stats.cost)}</span>` : ''}</div>`;
   const folder = task.workingDir ? `<span class="task-folder" data-tooltip="${esc(task.workingDir)}">${ACTION_ICONS.folder} ${esc(task.workingDir)}</span>` : '';
-  const description = task.description?.trim() ? esc(task.description) : '暂无描述';
+  const description = task.description?.trim();
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
-  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><span class="card-status-icon ${task.status}" role="img" aria-label="状态：${esc(STATUS[task.status]?.label || '未知')}" title="${esc(STATUS[task.status]?.label || '未知状态')}">${STATUS_ICONS[task.status] || '•'}</span><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div><p class="card-desc${task.description?.trim() ? '' : ' is-empty'}" data-tooltip="${esc(task.description)}">${description}</p>${archiveInfo}${statHtml}<div class="card-actions">${actions(task)}</div></article>`;
+  return `<article class="card ${task.status} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row"><span class="card-status-icon ${task.status}" role="img" aria-label="状态：${esc(STATUS[task.status]?.label || '未知')}" title="${esc(STATUS[task.status]?.label || '未知状态')}">${STATUS_ICONS[task.status] || '•'}</span><h3 class="card-title" data-tooltip="${esc(task.title)}">${esc(task.title)}</h3><span class="spacer"></span>${task.deadline ? `<span class="deadline ${task.overdue ? 'overdue' : ''}">${ACTION_ICONS.calendar} ${deadline(task.deadline)}${task.overdue ? ' · 逾期' : ''}</span>` : ''}</div>${folder}</div></div>${description ? `<p class="card-desc" data-tooltip="${esc(description)}">${esc(description)}</p>` : ''}${archiveInfo}<div class="card-actions">${actions(task)}</div></article>`;
 }
 function boardGroupOptions() {
   const options = [{ value: 'single', label: '全部' }];
@@ -337,8 +339,13 @@ function renderList() {
 function availableSessions(task) {
   return Array.isArray(task?.sessions) ? task.sessions : [];
 }
+function showSessionTask(taskId) {
+  state.sessionTaskIds.add(taskId);
+  state.hiddenCompletedSessionTasks.delete(taskId);
+  saveLayoutState();
+}
 function sessionTasks() {
-  return state.tasks.filter((task) => ['todo', 'running', 'done'].includes(task.status) && availableSessions(task).length > 0 && !state.hiddenCompletedSessionTasks.has(task.id));
+  return state.tasks.filter((task) => task.status !== 'archived' && (availableSessions(task).length > 0 || state.sessionTaskIds.has(task.id)) && !state.hiddenCompletedSessionTasks.has(task.id));
 }
 function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
@@ -353,11 +360,25 @@ function renderSessionHeader() {
   $('#session-name').textContent = sessionName;
   $('#session-name').title = sessionName || '会话名称';
   $('#copy-session-file').disabled = !child?.sessionFile;
-  $('#session-title').setAttribute('aria-expanded', String(Boolean(state.sessionDescriptionOpen && task)));
+  $('#session-restart').disabled = !task || !child;
+  if (!task) sessionTaskDetailsOpen = false;
+  $('#session-title').disabled = !task;
+  $('#session-title').setAttribute('aria-expanded', String(Boolean(task && sessionTaskDetailsOpen)));
+  $('#session-task-details-panel').classList.toggle('hidden', !task || !sessionTaskDetailsOpen);
+  $('#session-working-dir').textContent = task?.workingDir || '未设置工作路径';
   $('#session-description-text').textContent = task?.description?.trim() || '暂无任务描述';
-  $('#session-description-panel').classList.toggle('hidden', !state.sessionDescriptionOpen || !task);
-  $('#session-restart').disabled = !task;
-  $('#session-task-select').innerHTML = '<option value="">选择一个任务会话</option>' + sessionTasks().map((item) => `<option value="${item.id}"${item.id === state.sessionTask ? ' selected' : ''}>${esc(item.title)}</option>`).join('');
+  $('#session-task-select').innerHTML = '<option value="">选择一个任务会话</option>' + sessionTasks().filter((item) => availableSessions(item).length > 0).map((item) => `<option value="${item.id}"${item.id === state.sessionTask ? ' selected' : ''}>${esc(item.title)}</option>`).join('');
+}
+function closeSessionTaskDetails() {
+  clearTimeout(sessionTaskDetailsCloseTimer);
+  sessionTaskDetailsCloseTimer = null;
+  if (!sessionTaskDetailsOpen) return;
+  sessionTaskDetailsOpen = false;
+  renderSessionHeader();
+}
+function scheduleSessionTaskDetailsClose() {
+  clearTimeout(sessionTaskDetailsCloseTimer);
+  sessionTaskDetailsCloseTimer = setTimeout(closeSessionTaskDetails, 600);
 }
 function renderSessionTree() {
   renderSessionHeader();
@@ -368,20 +389,34 @@ function renderSessionTree() {
     const colorKey = taskColor(task);
     const customClass = customColors[colorKey] ? ' custom-color' : '';
     const taskAction = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
-    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span data-tooltip="${esc(task.title)}">${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-child-name" data-tooltip="${esc(title)}">${esc(title)}</span>${unread ? `<b class="session-unread-count">${unreadLabel}</b>` : ''}</button>${sessions.length > 1 ? `<button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button>` : ''}</div>`; }).join('')}</div>`;
+    const sessionItems = sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-child-name" data-tooltip="${esc(title)}">${esc(title)}</span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`; }).join('');
+    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span data-tooltip="${esc(task.title)}">${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessionItems}</div>`;
   }).join('') : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
   syncOverflowTooltips($('#session-tree'));
 }
 async function refresh() {
   try {
     const data = await api('/tasks');
-    const signature = JSON.stringify(data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.stats?.messages, task.stats?.totalTokens]));
+    const signature = JSON.stringify(data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.sessions?.length]));
     state.tasks = data.tasks;
+    const taskIds = new Set(data.tasks.map((task) => task.id));
+    const sessionKeys = new Set(data.tasks.flatMap((task) => availableSessions(task).map((session) => sessionMarkerKey(task.id, session.id))));
+    for (const key of [...seenSessionMessageIds.keys()]) if (!sessionKeys.has(key)) seenSessionMessageIds.delete(key);
+    for (const key of [...readRequests.keys()]) if (!sessionKeys.has(key)) readRequests.delete(key);
+    let layoutChanged = false;
+    for (const taskId of [...state.sessionTaskIds]) {
+      if (!taskIds.has(taskId)) { state.sessionTaskIds.delete(taskId); layoutChanged = true; }
+    }
+    for (const taskId of [...state.hiddenCompletedSessionTasks]) {
+      if (!taskIds.has(taskId)) { state.hiddenCompletedSessionTasks.delete(taskId); layoutChanged = true; }
+    }
+    data.tasks.forEach((task) => { if (availableSessions(task).length > 0) state.sessionTaskIds.add(task.id); });
+    if (layoutChanged) saveLayoutState();
     rememberCurrentSessionMessage();
     if (state.sessionTask && !sessionTasks().some((task) => task.id === state.sessionTask)) {
       detachTui();
       state.sessionTask = null;
-      state.sessionSessionId = 'main';
+      state.sessionSessionId = null;
       saveLayoutState();
     }
     renderStats(); renderTaskSidebar(); renderSessionTree();
@@ -392,10 +427,10 @@ async function refresh() {
       if (state.module === 'session') {
         switchModule('session');
         const task = currentTask(state.sessionTask);
-        if (task && sessionTasks().some((item) => item.id === task.id)) selectSession(task.id, state.sessionSessionId);
+        if (task && sessionTasks().some((item) => item.id === task.id) && availableSessions(task).length > 0) selectSession(task.id, state.sessionSessionId);
         else {
           state.sessionTask = null;
-          state.sessionSessionId = 'main';
+          state.sessionSessionId = null;
           renderSessionTree();
           saveLayoutState();
         }
@@ -702,11 +737,11 @@ async function restartTuiForTheme() {
   if (!state.sessionTask || !tuiSocket) return;
   await restartCurrentTui('主题已切换，正在重启会话…');
 }
-function selectSession(taskId, sessionId = 'main') {
+function selectSession(taskId, sessionId = null) {
   const task = currentTask(taskId);
   const target = availableSessions(task).find((session) => session.id === sessionId);
-  // 新建任务没有「主会话」；传入的 id 不存在时回退到服务端活跃会话或首个会话
-  const nextSessionId = target?.id || task?.activeSessionId || availableSessions(task)[0]?.id || 'main';
+  // 传入的 id 不存在时回退到服务端活跃会话或首个会话
+  const nextSessionId = target?.id || task?.activeSessionId || availableSessions(task)[0]?.id || null;
   const changing = state.sessionTask !== taskId || state.sessionSessionId !== nextSessionId;
   if (state.sessionTask && changing) leaveCurrentSession();
   // 重复点击当前子会话不应重启 TUI。
@@ -762,8 +797,8 @@ function setFieldError(form, inputId, message = '') {
 }
 function openTaskForm(task = null, options = {}) {
   const openSessionAfterCreate = Boolean(options.openSessionAfterCreate && !task);
-  const workingDirEditable = !task || !['running', 'done'].includes(task.status);
-  const workingDirHint = workingDirEditable ? '' : '（处理中或已完成不可修改）';
+  const workingDirEditable = true;
+  const workingDirHint = task ? '（仅新会话使用此路径）' : '';
   const workingDirReadonly = workingDirEditable ? '' : ' disabled';
   const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label for="task-working-dir">工作目录${workingDirHint}<div class="path-picker-row"><div class="working-dir-field"><input id="task-working-dir" name="workingDir" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list" value="${esc(task?.workingDir || '')}"${workingDirReadonly}><div id="recent-task-dir-list" class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" id="choose-task-dir" class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button></div><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button type="button" class="primary" id="save-task">${task ? '保存' : '创建'}</button><button type="button" data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
@@ -885,8 +920,7 @@ function openTaskForm(task = null, options = {}) {
       button.disabled = true;
       button.textContent = task ? '保存中…' : '创建中…';
       if (workingDirEditable) rememberWorkingDir(workingDir);
-      const body = { title, description: $('#task-desc', form).value, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null };
-      if (workingDirEditable) body.workingDir = workingDir;
+      const body = { title, description: $('#task-desc', form).value, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null, workingDir };
       const result = await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body });
       closeModal();
       if (!task && openSessionAfterCreate && result.task) {
@@ -902,6 +936,7 @@ async function openExecute(task) {
   if (!task.workingDir) return openTaskForm(task);
   try {
     const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
+    showSessionTask(task.id);
     await refresh(); switchModule('session'); selectSession(task.id, result.session.id);
     toast(task.description ? '已打开会话，请在 pi 输入框中发送任务描述。' : '已打开会话。');
   } catch (error) { toast(error.message, 'error'); }
@@ -942,6 +977,7 @@ function openClearArchivedModal() {
 async function createChildSession(task) {
   try {
     const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
+    showSessionTask(task.id);
     await refresh();
     selectSession(task.id, result.session.id);
     toast('子会话已创建');
@@ -962,6 +998,7 @@ function openSessionModal(task, session = null) {
       button.disabled = true;
       button.textContent = editing ? '保存中…' : '创建中…';
       const result = await api(editing ? `/tasks/${task.id}/sessions/${session.id}` : `/tasks/${task.id}/sessions`, { method: editing ? 'PATCH' : 'POST', body: { title } });
+      if (!editing) showSessionTask(task.id);
       closeModal(); await refresh(); if (!editing || (state.sessionTask === task.id && state.sessionSessionId === session.id)) selectSession(task.id, result.session.id);
     } catch (error) { button.disabled = false; button.textContent = editing ? '保存' : '创建'; toast(error.message, 'error'); }
   };
@@ -969,11 +1006,57 @@ function openSessionModal(task, session = null) {
 function openDeleteSessionModal(task, sessionId) {
   const form = modal(`<h2>删除子会话</h2><p>确定删除「${esc(task.title)}」下的这个子会话及其日志吗？</p><div class="modal-actions"><button class="danger" id="confirm-delete-session">删除</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
-  $('#confirm-delete-session', form).onclick = async () => { try { const remaining = task.sessions?.find((item) => item.id !== sessionId); await api(`/tasks/${task.id}/sessions/${sessionId}`, { method: 'DELETE' }); closeModal(); await refresh(); if (state.sessionTask === task.id && state.sessionSessionId === sessionId && remaining) selectSession(task.id, remaining.id); } catch (error) { toast(error.message, 'error'); } };
+  $('#confirm-delete-session', form).onclick = async () => {
+    try {
+      const deletingCurrent = state.sessionTask === task.id && state.sessionSessionId === sessionId;
+      if (deletingCurrent) leaveCurrentSession();
+      const result = await api(`/tasks/${task.id}/sessions/${sessionId}`, { method: 'DELETE' });
+      const nextSessionId = result.task?.activeSessionId || result.task?.sessions?.[0]?.id || null;
+      if (deletingCurrent) {
+        detachTui();
+        state.sessionSessionId = nextSessionId || null;
+      }
+      closeModal();
+      await refresh();
+      if (deletingCurrent && nextSessionId) selectSession(task.id, nextSessionId);
+      saveLayoutState();
+    } catch (error) { toast(error.message, 'error'); }
+  };
 }
 function leaveCurrentSession() {
   if (!state.sessionTask || !state.sessionSessionId) return;
   markSessionRead(state.sessionTask, state.sessionSessionId);
+}
+function hideSessionTask(task) {
+  const runningSessions = availableSessions(task).filter((session) => session.running);
+  if (!task.piRunning && !runningSessions.length) return applyHide();
+  const count = runningSessions.length || 1;
+  const form = modal(`<h2>终止运行中的会话？</h2><p>任务「${esc(task.title)}」有 ${count} 个子会话正在运行。隐藏任务会终止这些会话，是否继续？</p><div class="modal-actions"><button type="button" class="danger" id="confirm-hide-session-task">终止并隐藏</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-hide-session-task', form).onclick = async () => {
+    const button = $('#confirm-hide-session-task', form);
+    button.disabled = true;
+    try {
+      await api(`/tasks/${task.id}/terminate`, { method: 'POST' });
+      closeModal();
+      applyHide();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  };
+  function applyHide() {
+    state.sessionTaskIds.delete(task.id);
+    state.hiddenCompletedSessionTasks.add(task.id);
+    if (state.sessionTask === task.id) {
+      leaveCurrentSession();
+      detachTui();
+      state.sessionTask = null;
+      state.sessionSessionId = null;
+    }
+    renderSessionTree();
+    saveLayoutState();
+  }
 }
 function markSessionRead(taskId, sessionId, { keepalive = false } = {}) {
   if (!taskId || !sessionId) return;
@@ -1043,6 +1126,7 @@ $('#theme-menu').onclick = (event) => {
 };
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#style-toggle, #mode-toggle, #theme-menu')) closeThemeMenu();
+  if (sessionTaskDetailsOpen && !event.target.closest('#session-context-copy')) closeSessionTaskDetails();
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeThemeMenu();
@@ -1075,17 +1159,18 @@ $('#session-sidebar-new-task').onclick = () => openTaskForm(null, { openSessionA
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
 $('#session-title').onclick = () => {
   if (!currentTask(state.sessionTask)) return;
-  state.sessionDescriptionOpen = !state.sessionDescriptionOpen;
+  clearTimeout(sessionTaskDetailsCloseTimer);
+  sessionTaskDetailsCloseTimer = null;
+  sessionTaskDetailsOpen = !sessionTaskDetailsOpen;
   renderSessionHeader();
-  saveLayoutState();
 };
-document.addEventListener('click', (event) => {
-  if (state.sessionDescriptionOpen && !event.target.closest('.session-context')) {
-    state.sessionDescriptionOpen = false;
-    renderSessionHeader();
-    saveLayoutState();
-  }
-});
+$('#session-context-copy').onpointerenter = () => {
+  clearTimeout(sessionTaskDetailsCloseTimer);
+  sessionTaskDetailsCloseTimer = null;
+};
+$('#session-context-copy').onpointerleave = () => {
+  if (sessionTaskDetailsOpen) scheduleSessionTaskDetailsClose();
+};
 $('#copy-session-file').onclick = async () => {
   const task = currentTask(state.sessionTask);
   const session = availableSessions(task).find((item) => item.id === state.sessionSessionId);
@@ -1103,15 +1188,8 @@ $('#session-tree').onclick = (event) => {
   const removeCompleted = event.target.closest('[data-remove-completed-task]');
   if (removeCompleted) {
     event.stopPropagation();
-    state.hiddenCompletedSessionTasks.add(removeCompleted.dataset.removeCompletedTask);
-    if (state.sessionTask === removeCompleted.dataset.removeCompletedTask) {
-      leaveCurrentSession();
-      detachTui();
-      state.sessionTask = null;
-      state.sessionSessionId = 'main';
-    }
-    renderSessionTree();
-    saveLayoutState();
+    const task = currentTask(removeCompleted.dataset.removeCompletedTask);
+    if (task) hideSessionTask(task);
     return;
   }
   const remove = event.target.closest('[data-delete-session]');
@@ -1179,15 +1257,16 @@ $('#task-list').onclick = async (event) => {
       await openExecute(task);
     }
     else if (button.dataset.action === 'session') {
-      state.hiddenCompletedSessionTasks.delete(task.id);
+      showSessionTask(task.id);
       if (!availableSessions(task).length) {
         const result = await api(`/tasks/${task.id}/sessions`, { method: 'POST', body: { title: '新会话' } });
+        saveLayoutState();
         await refresh();
         switchModule('session'); selectSession(task.id, result.session.id);
         toast('已新建会话。');
       } else {
         saveLayoutState();
-        switchModule('session'); selectSession(task.id, task.activeSessionId || 'main');
+        switchModule('session'); selectSession(task.id, task.activeSessionId || null);
       }
     }
     else if (button.dataset.action === 'edit') openTaskForm(task);
@@ -1209,7 +1288,7 @@ $('#task-list').onclick = async (event) => {
         leaveCurrentSession();
         detachTui();
         state.sessionTask = null;
-        state.sessionSessionId = 'main';
+        state.sessionSessionId = null;
       }
       await refresh();
       saveLayoutState();
