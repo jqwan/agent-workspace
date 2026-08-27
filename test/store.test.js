@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTasks } from '../lib/store.js';
+import { ARCHIVE_RETENTION_MS, normalizeTasks, normalizeNotes } from '../lib/store.js';
 
 test('normalizeTasks backfills legacy sessions and converts unknown statuses to unfinished', () => {
   const now = new Date('2026-01-01T00:00:00.000Z');
@@ -32,4 +32,27 @@ test('normalizeTasks migrates legacy unfinished statuses', () => {
   const result = normalizeTasks(tasks);
   assert.equal(result.changed, true);
   assert.deepEqual(result.tasks.map((task) => task.status), ['unfinished', 'unfinished']);
+});
+
+test('normalizeNotes keeps optional titles and removes notes without descriptions', () => {
+  const result = normalizeNotes([
+    {
+      id: 'note', title: '', description: '  记录内容  ', color: 'yellow',
+      pinnedToTopBar: true, pinnedToSessionBar: false,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    { id: 'empty', title: '只有标题', description: '' },
+  ]);
+  assert.equal(result.changed, true);
+  assert.equal(result.notes.length, 1);
+  assert.equal(result.notes[0].title, '');
+  assert.equal(result.notes[0].description, '记录内容');
+  assert.equal(result.notes[0].pinnedToTopBar, true);
+});
+
+test('normalizeNotes backfills the 15-day purge deadline for archived notes', () => {
+  const archivedAt = '2026-01-01T00:00:00.000Z';
+  const result = normalizeNotes([{ id: 'archived-note', description: '已废弃', status: 'archived', archivedAt }]);
+  assert.equal(result.notes[0].archivedAt, archivedAt);
+  assert.equal(result.notes[0].purgeAt, new Date(new Date(archivedAt).getTime() + ARCHIVE_RETENTION_MS).toISOString());
 });

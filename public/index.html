@@ -5,15 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#edf1f2">
   <title>工作台</title>
-  <link rel="stylesheet" href="style.css?v=studio-185">
+  <link rel="stylesheet" href="style.css?v=studio-210">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳转到主要内容</a>
   <header class="topbar">
     <div class="topbar-brand" aria-label="工作台"><span class="brand-mark" aria-hidden="true">π</span><span class="brand-copy"><strong>工作台</strong><small>PI WORKSPACE</small></span></div>
-    <div id="toast-root" role="status" aria-live="polite" aria-atomic="true"></div>
-    <div class="topbar-tools"><span class="local-status"><i aria-hidden="true"></i>本机运行</span><div id="stats" class="stats"></div></div>
+    <div id="toast-root" role="status" aria-live="polite" aria-atomic="true"><div id="note-marquee" class="note-marquee" aria-label="通知消息框" aria-hidden="true"></div></div><div id="topbar-note-buttons" class="topbar-note-buttons" aria-label="置顶便签"></div><div class="topbar-tools"><span class="local-status"><i aria-hidden="true"></i>本机运行</span><div id="stats" class="stats"></div></div>
   </header>
   <div id="workspace-shell">
     <aside id="app-sidebar" class="app-sidebar">
@@ -22,21 +21,21 @@
         <button id="module-tasks" class="sidebar-nav-item active" type="button" role="tab" aria-label="看板" aria-selected="true" aria-controls="task-list"><span aria-hidden="true">▣</span><span>看板</span></button>
         <button id="module-session" class="sidebar-nav-item" type="button" role="tab" aria-label="会话" aria-selected="false" aria-controls="session-view"><span aria-hidden="true">◌</span><span>会话</span></button>
       </div>
-      <div id="task-sidebar" class="sidebar-panel"><button id="sidebar-new-task" class="sidebar-action" type="button" aria-label="新建任务"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">新建</span></button><div id="task-groups" class="task-groups"></div></div>
-      <div id="session-sidebar" class="sidebar-panel hidden"><button id="session-sidebar-new-task" class="sidebar-action" type="button" aria-label="新建任务并打开会话"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">新建</span></button><div id="session-tree"></div></div>
+      <div id="task-sidebar" class="sidebar-panel"><div class="sidebar-new-actions"><button id="sidebar-new-task" class="sidebar-action" type="button" aria-label="新建任务"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">任务</span></button><button id="sidebar-new-note" class="sidebar-action" type="button" aria-label="新建便签"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">便签</span></button></div><div id="task-groups" class="task-groups"></div></div>
+      <div id="session-sidebar" class="sidebar-panel hidden"><div class="sidebar-new-actions"><button id="session-sidebar-new-task" class="sidebar-action" type="button" aria-label="新建任务并打开会话"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">任务</span></button><button id="session-sidebar-new-note" class="sidebar-action" type="button" aria-label="新建便签并标记会话"><span class="group-icon" aria-hidden="true">＋</span><span class="group-label">便签</span></button></div><div id="session-tree"></div></div>
     </aside>
     <main id="workspace-main">
-      <section class="toolbar" id="task-toolbar"><div class="toolbar-intro"><span class="section-kicker">LOCAL / TASKS</span><h1 id="task-view-title">任务控制台</h1></div><div class="toolbar-controls"><label class="sr-only" for="status-toggle">任务状态</label><button id="status-toggle" class="status-filter-toggle" type="button" aria-label="切换任务状态" title="切换任务状态">全部</button><label class="sr-only" for="sort-toggle">排序方式</label><button id="sort-toggle" class="layout-toggle view-toggle" type="button" aria-label="切换排序方式" title="切换排序方式"></button><label class="sr-only" for="board-group-toggle">看板分组方式</label><button id="board-group-toggle" class="layout-toggle view-toggle" type="button" aria-label="切换看板分布" title="切换看板分布"></button><label class="sr-only" for="board-card-layout">卡片布局</label><button id="board-card-layout" class="layout-toggle" type="button" aria-label="切换卡片布局" title="切换卡片布局"><span aria-hidden="true">▯</span></button><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" name="search" type="search" autocomplete="off" aria-label="搜索任务" placeholder="搜索标题或内容…" title="搜索任务（⌘K / Ctrl K）"></label></div></section>
+      <section class="toolbar" id="task-toolbar"><div class="toolbar-intro"><span class="section-kicker">LOCAL / TASKS</span><h1 id="task-view-title">任务控制台</h1></div><div id="board-filter-tabs" class="board-filter-tabs" role="group" aria-label="看板筛选"></div><div class="toolbar-controls"><div class="toolbar-tools"><label class="sr-only" for="sort-toggle">排序方式</label><button id="sort-toggle" class="layout-toggle view-toggle" type="button" aria-label="切换排序方式" title="切换排序方式"></button><label class="sr-only" for="board-group-toggle">看板分组方式</label><button id="board-group-toggle" class="layout-toggle view-toggle" type="button" aria-label="切换看板分布" title="切换看板分布"></button><label class="sr-only" for="board-card-layout">卡片布局</label><button id="board-card-layout" class="layout-toggle" type="button" aria-label="切换卡片布局" title="切换卡片布局"><span aria-hidden="true">▯</span></button><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" name="search" type="search" autocomplete="off" aria-label="搜索任务" placeholder="搜索标题或内容…" title="搜索标题或内容…"></label></div></div></section>
       <section id="task-list" class="module-view"></section>
       <section id="session-view" class="module-view hidden">
         <div class="session-layout"><div class="session-main">
-          <header class="session-header"><div class="session-context"><span class="session-context-icon" aria-hidden="true">π</span><div id="session-context-copy" class="session-context-copy"><button id="session-title" class="session-title-button" type="button" aria-expanded="false" aria-controls="session-task-details-panel">选择一个子会话</button><div class="session-file-row"><span id="session-name" class="session-file-path" title="会话名称"></span><button id="copy-session-file" class="session-file-copy" type="button" title="复制 pi 会话命令" aria-label="复制 pi 会话命令">⧉</button></div><section id="session-task-details-panel" class="session-description-panel hidden" aria-label="任务详情"><div class="session-detail-row"><span>工作路径</span><code id="session-working-dir"></code></div><div class="session-detail-row"><span>任务描述</span><p id="session-description-text"></p></div></section></div></div><div class="session-controls"><label class="sr-only" for="session-task-select">选择任务会话</label><select id="session-task-select" name="sessionTask"><option value="">选择会话</option></select><button id="session-restart" class="icon-button" type="button" title="重新连接" aria-label="重新连接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10V4h6M4 4l4 4a8 8 0 1 1-1 10"/></svg></button></div></header>
+          <header class="session-header"><div class="session-context"><span class="session-context-icon" aria-hidden="true">π</span><div id="session-context-copy" class="session-context-copy"><button id="session-title" class="session-title-button" type="button" aria-expanded="false" aria-controls="session-task-details-panel">选择一个子会话</button><div class="session-file-row"><span id="session-name" class="session-file-path" title="会话名称"></span><button id="copy-session-file" class="session-file-copy" type="button" title="复制 pi 会话命令" aria-label="复制 pi 会话命令">⧉</button></div><section id="session-task-details-panel" class="session-description-panel hidden" aria-label="任务详情"><div class="session-detail-row"><span>工作路径</span><code id="session-working-dir"></code></div><div class="session-detail-row"><span>任务描述</span><p id="session-description-text"></p></div></section></div></div><div id="session-note-buttons" class="session-note-buttons" aria-label="会话便签"></div><div class="session-controls"><label class="sr-only" for="session-task-select">选择任务会话</label><select id="session-task-select" name="sessionTask"><option value="">选择会话</option></select></div></header>
           <div id="session-terminal" class="session-terminal" aria-label="pi 终端"><div class="terminal-empty">从左侧选择一个会话以打开 pi 会话</div></div>
         </div></div>
       </section>
     </main>
   </div>
   <div id="modal-root"></div>
-  <script type="module" src="app.js?v=studio-122"></script>
+  <script type="module" src="app.js?v=studio-161"></script>
 </body>
 </html>

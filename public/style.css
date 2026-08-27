@@ -279,8 +279,12 @@ h1, h2, h3 { text-wrap: balance; }
   box-shadow: 0 5px 0 color-mix(in srgb, var(--accent-strong) 40%, transparent);
 }
 .sidebar-action:hover { background: color-mix(in srgb, var(--accent-strong) 86%, #000); color: #fffaf4; border-color: var(--accent-strong); }
+.sidebar-new-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.sidebar-new-actions .sidebar-action { min-width: 0; padding-left: 6px; padding-right: 6px; }
 #sidebar-new-task,
-#session-sidebar-new-task { box-shadow: none; }
+#sidebar-new-note,
+#session-sidebar-new-task,
+#session-sidebar-new-note { box-shadow: none; }
 .task-groups,
 #session-tree {
   display: grid;
@@ -381,6 +385,40 @@ h1, h2, h3 { text-wrap: balance; }
 }
 .toolbar-intro h1 em { color: var(--accent-strong); font-style: normal; }
 .toolbar-intro p { display: none; }
+.board-filter-tabs {
+  display: flex;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: 8px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: var(--shadow);
+  scrollbar-width: none;
+}
+.board-filter-tabs::-webkit-scrollbar { display: none; }
+.board-filter-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 11px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.board-filter-option:hover { background: var(--surface-muted); color: var(--ink); border-color: transparent; }
+.board-filter-option.active { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: var(--accent-soft); color: var(--accent-strong); font-weight: 750; }
+.board-filter-option b { min-width: 20px; padding: 1px 5px; border-radius: 999px; background: var(--surface-muted); color: var(--muted); font: 10px "SFMono-Regular", Consolas, monospace; text-align: center; }
+.board-filter-option.active b { background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised)); color: var(--accent-strong); }
 .toolbar-controls {
   display: flex;
   align-items: center;
@@ -390,6 +428,8 @@ h1, h2, h3 { text-wrap: balance; }
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   box-shadow: var(--shadow);
 }
+.toolbar-tools { display: flex; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; }
+.toolbar-tools .search-field { width: min(360px, 100%); flex: 0 1 360px; }
 .toolbar select, .toolbar input {
   height: 36px;
   padding: 0 10px;
@@ -492,6 +532,8 @@ h1, h2, h3 { text-wrap: balance; }
 .icon-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .primary { background: var(--accent-strong) !important; color: #fffaf4 !important; border-color: var(--accent-strong) !important; }
 .primary:hover { background: var(--accent-strong) !important; border-color: var(--accent-strong) !important; }
+.note-pin-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.note-pin-active:hover { background: var(--accent-soft); border-color: var(--accent-strong); color: var(--accent-strong); }
 .danger { color: #b53d2b; }
 .task-board .card-actions { gap: 5px; margin-top: 10px; }
 .task-board .card-actions button { height: 30px; padding: 5px 8px; font-size: 12px; }
@@ -801,8 +843,9 @@ body.theme-dark {
   .toolbar-intro { gap: 10px; margin-bottom: 10px; }
   .toolbar-intro h1 { font-size: 19px; }
   .toolbar-controls { flex-wrap: wrap; }
+  .toolbar-tools { flex-wrap: wrap; }
+  .toolbar-tools .search-field { flex-basis: 100%; }
   .toolbar-controls > select { flex: 1 1 calc(50% - 8px); min-width: 0; }
-  .search-field { flex-basis: 100%; }
   #task-list, .board-mode #task-list { padding: 0 14px 40px; }
   .task-board-column { padding: 10px; }
   .card { padding-left: 13px; padding-right: 13px; }
@@ -2851,6 +2894,12 @@ body {
 }
 #task-toolbar {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "intro intro" "filters controls";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
   flex: 0 0 auto;
   z-index: 3;
   width: 100%;
@@ -2858,6 +2907,15 @@ body {
   margin: 0;
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(12px);
+}
+#task-toolbar .toolbar-intro { grid-area: intro; margin-bottom: 0; }
+#task-toolbar .board-filter-tabs { grid-area: filters; margin-bottom: 0; }
+#task-toolbar .toolbar-controls { grid-area: controls; width: auto; min-width: 0; }
+#task-toolbar .toolbar-tools { width: auto; }
+@media (max-width: 900px) {
+  #task-toolbar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "intro" "filters" "controls"; }
+  #task-toolbar .toolbar-controls { width: 100%; }
+  #task-toolbar .toolbar-tools { width: 100%; }
 }
 #task-list {
   flex: 1 1 auto;
@@ -2871,23 +2929,6 @@ body {
 }
 #task-toolbar .toolbar-controls {
   width: 100%;
-}
-.status-filter-toggle {
-  display: inline-grid;
-  place-items: center;
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  padding: 0;
-  line-height: 1;
-}
-.status-filter-toggle svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linejoin: round;
 }
 .sidebar-header,
 .sidebar-nav {
@@ -2939,3 +2980,36 @@ body {
     max-height: 180px;
   }
 }
+
+/* 便签：网页顶部、会话顶部与随机提示流。 */
+.topbar-note-buttons, .session-note-buttons { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: min(30vw, 260px); overflow-x: auto; scrollbar-width: none; }.topbar-note-buttons { position: relative; order: 2; margin-left: auto; overflow: visible; }
+.topbar-note-buttons::-webkit-scrollbar, .session-note-buttons::-webkit-scrollbar { display: none; }
+.note-button { position: relative; display: grid; flex: 0 0 28px; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 7px; border-color: var(--line-strong); color: var(--ink); font-size: 13px; font-weight: 800; line-height: 1; }
+.note-button.color-red { background: var(--wash-red); }.note-button.color-orange { background: var(--wash-orange); }.note-button.color-yellow { background: var(--wash-yellow); }.note-button.color-green { background: var(--wash-green); }.note-button.color-cyan { background: var(--wash-cyan); }.note-button.color-blue { background: var(--wash-blue); }.note-button.color-purple { background: var(--wash-purple); }.note-button.color-gray { background: var(--wash-gray); }
+.note-button.custom-color { background: color-mix(in srgb, var(--task-color) 15%, var(--surface-raised)); }
+.note-button:hover { border-color: var(--accent); color: var(--accent-strong); }
+.note-button.note-dragging { z-index: 3; cursor: grabbing; opacity: 1; outline: 3px solid var(--accent); outline-offset: 2px; transform: scale(1.12) !important; box-shadow: 0 6px 16px color-mix(in srgb, var(--ink) 28%, transparent); }
+.note-drag-active .note-button { cursor: grabbing; }
+/* 会话便签区横向滚动会裁切下移 1px 的按下态；预留内边距而非取消按下动画。 */
+.session-note-buttons { padding: 1px; margin: -1px; }
+.session-note-menu { position: fixed; z-index: 30; display: grid; gap: 2px; min-width: 190px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); box-shadow: var(--shadow); }
+.session-note-menu-title { padding: 4px 8px 6px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-note-menu button { width: 100%; padding: 8px 10px; border: 0; background: transparent; color: var(--ink); font-size: 12px; text-align: left; white-space: nowrap; }
+.session-note-menu button:hover, .session-note-menu button:focus-visible { border-color: transparent; background: var(--accent-soft); color: var(--accent-strong); outline: none; }
+#toast-root { position: relative; order: 3; flex: 0 1 360px; min-width: 180px; align-self: stretch; }.topbar-tools { order: 4; }
+#toast-root.notification-empty { flex: 0 0 0; min-width: 0; }.note-marquee.empty { display: none; }
+.note-marquee { position: absolute; /* 外框规格与 Toast 完全一致，Toast 出现时会短暂完整覆盖它。 */ top: 50%; right: 0; z-index: 0; display: flex; align-items: center; width: min(600px, 100%); min-width: 0; overflow: hidden; padding: 7px 8px 7px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow); font-size: 14px; line-height: 1.55; pointer-events: auto; transform: translateY(-50%); }
+#toast-root .toast { position: relative; z-index: 1; }
+.note-marquee-track { display: flex; width: max-content; min-width: 0; padding: 0; text-align: left; white-space: nowrap; will-change: transform; backface-visibility: hidden; transform: translate3d(0, 0, 0); animation: none; }.note-marquee-sequence { flex: 0 0 auto; }.note-marquee-track.empty { animation: none; transform: none; text-align: center; }
+.note-marquee-track.notice-text { display: block; width: 100%; }
+.note-marquee-track.notice-text,
+.note-marquee.notice .note-marquee-track { animation: none; transform: none; text-align: center; }
+@keyframes note-marquee-flow { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
+.topbar-note-panel { top: calc(100% + 9px); left: 0; width: min(420px, calc(100vw - 30px)); }
+.note-switch { display: flex !important; align-items: center; gap: 8px; cursor: pointer; }.note-switch input { display: inline-block; width: auto; margin: 0; accent-color: var(--accent-strong); }
+.session-header > .session-note-buttons { flex: 0 1 240px; flex-direction: row-reverse; margin-left: auto; }.session-header > .session-note-buttons:empty { display: none; }
+@media (prefers-reduced-motion: reduce) { .note-marquee-track { animation: none; transform: none; } }
+@media (max-width: 760px) { .topbar-note-buttons { max-width: 94px; }.topbar-note-buttons .note-button { flex-basis: 25px; width: 25px; height: 25px; font-size: 12px; }.note-marquee { right: 0; width: min(600px, 100%); padding-top: 6px; padding-bottom: 6px; }.session-header > .session-note-buttons { max-width: 142px; } }
+
+/* 通知消息框直接显示便签或临时通知，不再生成独立 Toast。 */
+.note-marquee.notice.error { background: color-mix(in srgb, #a83b28 10%, var(--surface-raised)); }

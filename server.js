@@ -6,14 +6,14 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
   ROOT, DATA_DIR, SESSIONS_DIR, CONFIG_FILE,
-  loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, subscribeTasks,
+  ARCHIVE_RETENTION_MS, loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, listNotes, getNote, createNote, updateNote, deleteNote, reorderNotes, subscribeTasks,
 } from './lib/store.js';
 import { parseSessionFile, extractText } from './lib/session.js';
 import { unreadAssistantMessages, messageTime, sessionUnreadCount, nextReadState } from './lib/unread.js';
 import { killPi } from './lib/executor.js';
 import {
   startWebTui, stopWebTui, stopWebTuiAndWait, stopWebTuiForRestart, stopAllWebTuis, writeWebTui, resizeWebTui,
-  isWebTuiRunning, subscribeWebTui, claimWebTuiInput, releaseWebTuiInput,
+  isWebTuiRunning, subscribeWebTui, claimWebTuiInput, releaseWebTuiInput, sendWebTuiPrompt,
 } from './lib/tui-executor.js';
 
 const DEFAULT_CONFIG = { port: 7777, maxConcurrent: 0, approvePi: true };
@@ -160,7 +160,7 @@ function removeTaskFiles(task) {
 async function stopTaskTui(taskId, options) {
   return stopWebTuiAndWait(taskId, options);
 }
-async function purgeArchivedTasks() {
+async function purgeArchivedItems() {
   const cutoff = Date.now();
   for (const task of listTasks()) {
     if (task.status !== 'archived' || !task.purgeAt || new Date(task.purgeAt).getTime() > cutoff) continue;
@@ -168,6 +168,10 @@ async function purgeArchivedTasks() {
     removeTaskFiles(task);
     activeSessionIds.delete(task.id);
     deleteTask(task.id);
+  }
+  for (const note of listNotes()) {
+    if (note.status !== 'archived' || !note.purgeAt || new Date(note.purgeAt).getTime() > cutoff) continue;
+    deleteNote(note.id);
   }
 }
 function withTuiLock(taskId, action) {
@@ -178,7 +182,7 @@ function withTuiLock(taskId, action) {
     if (tuiOpenings.get(taskId) === current) tuiOpenings.delete(taskId);
   });
 }
-async function openTaskTui(task, childSession, cols, rows, theme) {
+async function openTaskTui(task, childSession, cols, rows, theme, { activateSession = true } = {}) {
   if (!childSession) throw new Error('任务没有可用子会话');
   if (task.status === 'archived') throw new Error('当前任务状态不能打开原生 TUI');
   // 已有 session 以 JSONL header 中记录的 cwd 为准；任务目录只作为新 session 的默认值。
@@ -186,7 +190,7 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
   const workingDir = resolveWorkingDir(sessionCwd || task.workingDir);
   if (!workingDir) throw new Error('请先为任务设置工作目录');
   mkdirSync(workingDir, { recursive: true });
-  activeSessionIds.set(task.id, childSession.id);
+  if (activateSession) activeSessionIds.set(task.id, childSession.id);
   const record = await startWebTui({
     taskId: task.id, childSessionId: childSession.id, workingDir, sessionFile: childSession.sessionFile,
     title: childSession.title || task.title, provider: task.modelProvider, model: task.model,
@@ -203,6 +207,90 @@ async function openTaskTui(task, childSession, cols, rows, theme) {
   });
   return record;
 }
+
+function publicNote(note) {
+  return { ...note, overdue: Boolean(note.deadline && note.status !== 'archived' && new Date(note.deadline).getTime() < Date.now()) };
+}
+function notePatch(body = {}) {
+  const patch = {};
+  for (const key of ['title', 'description', 'color', 'deadline', 'pinnedToTopBar', 'pinnedToSessionBar']) if (key in body) patch[key] = body[key];
+  if ('title' in patch) patch.title = String(patch.title || '').trim();
+  if ('description' in patch) patch.description = String(patch.description || '').trim();
+  if ('deadline' in patch) patch.deadline = patch.deadline || null;
+  if ('pinnedToTopBar' in patch) patch.pinnedToTopBar = Boolean(patch.pinnedToTopBar);
+  if ('pinnedToSessionBar' in patch) patch.pinnedToSessionBar = Boolean(patch.pinnedToSessionBar);
+  return patch;
+}
+
+// 便签 CRUD
+app.get('/api/notes', (_req, res) => res.json({ notes: listNotes().map(publicNote) }));
+app.post('/api/notes', (req, res) => {
+  const patch = notePatch(req.body || {});
+  if (!patch.description) return res.status(400).json({ error: '便签描述不能为空' });
+  res.json({ note: publicNote(createNote(patch)) });
+});
+app.post('/api/notes/reorder', (req, res) => {
+  const placement = req.body?.placement;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((id) => typeof id === 'string') : null;
+  if (!['topbar', 'session'].includes(placement) || !ids) return res.status(400).json({ error: '无效的便签排序请求' });
+  const notes = reorderNotes(placement, ids);
+  res.json({ notes: notes.map(publicNote) });
+});
+app.put('/api/notes/:id', (req, res) => {
+  const note = getNote(req.params.id);
+  if (!note) return res.status(404).json({ error: '便签不存在' });
+  const patch = notePatch(req.body || {});
+  if ('description' in patch && !patch.description) return res.status(400).json({ error: '便签描述不能为空' });
+  res.json({ note: publicNote(updateNote(note.id, patch)) });
+});
+app.delete('/api/notes/:id', (req, res) => {
+  const note = getNote(req.params.id);
+  if (!note) return res.status(404).json({ error: '便签不存在' });
+  const archivedAt = nowIso();
+  const purgeAt = new Date(Date.now() + ARCHIVE_RETENTION_MS).toISOString();
+  res.json({ note: publicNote(updateNote(note.id, { status: 'archived', archivedAt, purgeAt })) });
+});
+app.post('/api/notes/:id/restore', (req, res) => {
+  const note = getNote(req.params.id);
+  if (!note) return res.status(404).json({ error: '便签不存在' });
+  if (note.status !== 'archived') return res.status(409).json({ error: '只有废弃便签可以恢复' });
+  res.json({ note: publicNote(updateNote(note.id, { status: 'active', archivedAt: null, purgeAt: null })) });
+});
+app.delete('/api/notes/:id/permanent', (req, res) => {
+  if (!deleteNote(req.params.id)) return res.status(404).json({ error: '便签不存在' });
+  res.json({ ok: true });
+});
+
+// 会话栏中的便签始终以当前会话为上下文，不保存任务或子会话关联。
+app.post('/api/notes/:id/send', async (req, res) => {
+  const note = getNote(req.params.id);
+  if (!note) return res.status(404).json({ error: '便签不存在' });
+  if (note.status === 'archived') return res.status(409).json({ error: '废弃便签不能发送' });
+  const task = getTask(req.body?.taskId);
+  if (!task) return res.status(400).json({ error: '请先打开一个会话' });
+  if (task.status === 'archived') return res.status(409).json({ error: '废弃任务不能发送便签' });
+  const mode = req.body?.mode === 'new' ? 'new' : 'current';
+  let session;
+  if (mode === 'new') {
+    session = { id: randomUUID(), title: '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
+    const sessions = taskSessions(task);
+    sessions.push(session);
+    const patch = { sessions };
+    if (!task.sessionFile) patch.sessionFile = session.sessionFile;
+    updateTask(task.id, patch);
+  } else {
+    session = taskSessions(task).find((item) => item.id === req.body?.sessionId);
+    if (!session) return res.status(400).json({ error: '当前子会话不存在' });
+  }
+  const runningSession = isWebTuiRunning(task.id, session.id);
+  if (!runningSession) {
+    const runningTask = isWebTuiRunning(task.id);
+    if (!runningTask && concurrencyFull(1)) return res.status(409).json({ error: `已达到并发上限：${config.maxConcurrent}` });
+    await withTuiLock(task.id, () => openTaskTui(getTask(task.id), session, 120, 34, 'light', { activateSession: mode !== 'new' }));
+  }
+  sendWebTuiPrompt(task.id, session.id, note.description);
+  res.json({ ok: true, mode, session: publicSession(session), task: publicTask(getTask(task.id)) });
+});
 
 // 任务 CRUD
 app.get('/api/tasks', (_req, res) => res.json({ tasks: listTasks().map(publicTask) }));
@@ -261,7 +349,7 @@ app.delete('/api/tasks/:id', async (req, res) => {
   for (const child of taskSessions(task)) killPi(child.sessionFile);
   activeSessionIds.delete(task.id);
   const archivedAt = nowIso();
-  const purgeAt = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+  const purgeAt = new Date(Date.now() + ARCHIVE_RETENTION_MS).toISOString();
   const validStatuses = ['unfinished', 'done'];
   const archivedFromStatus = validStatuses.includes(task.status) ? task.status : (validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'unfinished');
   res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedFromStatus, archivedAt, purgeAt })) });
@@ -364,7 +452,8 @@ app.delete('/api/tasks/:id/sessions/:sessionId', async (req, res) => {
 app.post('/api/tasks/:id/tui/restart', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  const stopped = await stopWebTuiForRestart(task.id, { sessionId: activeSessionIds.get(task.id) || null });
+  const requestedSessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null;
+  const stopped = await stopWebTuiForRestart(task.id, { sessionId: requestedSessionId || activeSessionIds.get(task.id) || null });
   res.json({ stopped });
 });
 app.post('/api/tasks/:id/terminate', async (req, res) => {
@@ -493,10 +582,10 @@ app.post('/api/config', (req, res) => {
   res.json(config);
 });
 
-setInterval(() => { void purgeArchivedTasks(); }, 60 * 60 * 1000);
+setInterval(() => { void purgeArchivedItems(); }, 60 * 60 * 1000);
 loadTasks();
 initializeSessionReadState();
-void purgeArchivedTasks();
+void purgeArchivedItems();
 const server = app.listen(config.port, '127.0.0.1', () => console.log(`[workbench] http://127.0.0.1:${config.port}`));
 server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
