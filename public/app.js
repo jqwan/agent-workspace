@@ -124,6 +124,12 @@ function applySidebarCollapsed(collapsed) {
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-expanded', String(!collapsed));
 }
+const TASK_VIEW_OPTIONS = [
+  { value: '', label: '全部', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="5" height="5" rx="1"/><rect x="14" y="5" width="5" height="5" rx="1"/><rect x="5" y="14" width="5" height="5" rx="1"/><rect x="14" y="14" width="5" height="5" rx="1"/></svg>' },
+  { value: 'unfinished', label: '未完成', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/></svg>' },
+  { value: 'done', label: '已完成', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>' },
+];
+const ARCHIVED_VIEW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>';
 const SORT_OPTIONS = [
   { value: 'updated', label: '最近更新', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg>' },
   { value: 'created', label: '创建时间', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 4v3M16 4v3M4 9.5h16M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/></svg>' },
@@ -133,8 +139,20 @@ const BOARD_GROUP_ICONS = {
   single: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>',
   status: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>',
   path: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM3.5 7.5v-1a2 2 0 0 1 2-2h4l2 2h5"/></svg>',
-  color: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="2"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/><circle cx="16" cy="16" r="2"/></svg>',
+  color: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16h1.5a2 2 0 0 0 0-4H12a1.5 1.5 0 0 1 0-3h3a5 5 0 0 0 5-5c0-2.2-3.6-4-8-4Z"/><circle cx="8" cy="9" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/></svg>',
 };
+function syncTaskToolbarTitle() {
+  $('#task-view-title').textContent = state.status === 'archived' ? '回收站' : '任务控制台';
+}
+function syncStatusControl() {
+  const button = $('#status-toggle');
+  const archived = state.status === 'archived';
+  const option = TASK_VIEW_OPTIONS.find((item) => item.value === state.status) || TASK_VIEW_OPTIONS[0];
+  button.innerHTML = archived ? ARCHIVED_VIEW_ICON : option.icon;
+  button.title = archived ? '当前显示废弃任务，请使用左侧分类切换' : `任务状态：${option.label}（点击切换）`;
+  button.setAttribute('aria-label', button.title);
+  button.disabled = archived;
+}
 function syncSortControl() {
   const button = $('#sort-toggle');
   const option = SORT_OPTIONS.find((item) => item.value === state.sort) || SORT_OPTIONS[0];
@@ -146,13 +164,15 @@ function syncCardLayoutControl() {
   const button = $('#board-card-layout');
   const compact = state.boardCardLayout === 'compact';
   button.innerHTML = compact
-    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="7" height="12" rx="1.5"/><rect x="13" y="6" width="7" height="12" rx="1.5"/></svg>'
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="5" height="12" rx="1.2"/><rect x="9.5" y="6" width="5" height="12" rx="1.2"/><rect x="16" y="6" width="5" height="12" rx="1.2"/></svg>'
     : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4" width="12" height="16" rx="1.5"/></svg>';
   button.title = `切换布局（当前：${compact ? '紧凑' : '单列'}）`;
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-pressed', String(compact));
 }
 applySidebarCollapsed(state.sidebarCollapsed);
+syncTaskToolbarTitle();
+syncStatusControl();
 syncSortControl();
 syncCardLayoutControl();
 $('#search').value = state.search;
@@ -243,9 +263,10 @@ function renderStats() {
 const GROUP_ICONS = { '': '▦', unfinished: '○', done: '✓', archived: '✕' };
 const STATUS_ICONS = { unfinished: '○', done: '✓', archived: '✕' };
 function renderTaskSidebar() {
-  $('#task-groups').innerHTML = [{ key: '', label: '全部任务' }, ...Object.entries(STATUS).map(([key, value]) => ({ key, label: value.label }))].map(({ key, label }) => {
+  $('#task-groups').innerHTML = [{ key: '', label: '任务' }, { key: 'archived', label: STATUS.archived.label }].map(({ key, label }) => {
+    const active = key === '' ? state.status !== 'archived' : state.status === key;
     const count = key ? state.tasks.filter((task) => task.status === key).length : state.tasks.filter((task) => task.status !== 'archived').length;
-    return `<button type="button" class="task-group-item${state.status === key ? ' active' : ''}" data-task-filter="${key}" aria-label="${esc(label)}" aria-pressed="${state.status === key}"><span class="group-icon" aria-hidden="true">${GROUP_ICONS[key] || '•'}</span><span class="group-label">${esc(label)}</span><b>${number(count)}</b></button>`;
+    return `<button type="button" class="task-group-item${active ? ' active' : ''}" data-task-filter="${key}" aria-label="${esc(label)}" aria-pressed="${active}"><span class="group-icon" aria-hidden="true">${GROUP_ICONS[key] || '•'}</span><span class="group-label">${esc(label)}</span><b>${number(count)}</b></button>`;
   }).join('');
 }
 function visibleTasks() {
@@ -280,7 +301,7 @@ function actions(task) {
   return `${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
 }
 function card(task, compact = false) {
-  const archiveInfo = task.status === 'archived' ? `<div class="archive-info">已废弃 · ${time(task.archivedAt)} · ${task.purgeAt ? `预计 ${time(task.purgeAt)} 自动删除` : ''}</div>` : '';
+  const archiveInfo = task.status === 'archived' ? `<div class="archive-info">废弃 · ${time(task.archivedAt)} · ${task.purgeAt ? `预计 ${time(task.purgeAt)} 自动删除` : ''}</div>` : '';
   const folder = task.workingDir ? `<span class="task-folder" data-tooltip="${esc(task.workingDir)}">${ACTION_ICONS.folder} ${esc(task.workingDir)}</span>` : '';
   const description = task.description?.trim();
   const colorKey = taskColor(task);
@@ -318,10 +339,12 @@ function boardGroups(tasks) {
   if (state.boardGroup === 'status' && !state.status) {
     return Object.keys(STATUS).map((key) => ({ label: STATUS[key].label, badgeClass: key, items: tasks.filter((task) => task.status === key) })).filter((group) => group.items.length > 0);
   }
-  return [{ label: state.status ? STATUS[state.status]?.label || '当前分组' : '全部任务', items: tasks }];
+  return [{ label: state.status ? STATUS[state.status]?.label || '当前分组' : '任务', items: tasks }];
 }
 function renderList() {
   document.body.classList.add('board-mode');
+  syncTaskToolbarTitle();
+  syncStatusControl();
   syncSortControl();
   syncCardLayoutControl();
   syncBoardGroupOptions();
@@ -942,13 +965,13 @@ async function openExecute(task) {
   } catch (error) { toast(error.message, 'error'); }
 }
 function openDeleteTaskModal(task) {
-  const form = modal(`<h2>废弃任务</h2><p>确定将「${esc(task.title)}」移入已废弃任务吗？任务及其会话会保留 15 天。</p><div class="modal-actions"><button class="danger" id="confirm-archive-task">移入已废弃</button><button data-close>取消</button></div>`);
+  const form = modal(`<h2>废弃任务</h2><p>确定将「${esc(task.title)}」移入废弃任务吗？任务及其会话会保留 15 天。</p><div class="modal-actions"><button class="danger" id="confirm-archive-task">移入废弃</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   $('#confirm-archive-task', form).onclick = async () => {
     try {
       await api(`/tasks/${task.id}`, { method: 'DELETE' });
       closeModal(); state.status = ''; applyViewSettings(); await refresh();
-      toast('任务已移入已废弃，15 天内可恢复');
+      toast('任务已移入废弃，15 天内可恢复');
     } catch (error) { toast(error.message, 'error'); }
   };
 }
@@ -958,7 +981,7 @@ function openPurgeTaskModal(task) {
   $('#confirm-purge-task', form).onclick = async () => { try { await api(`/tasks/${task.id}/permanent`, { method: 'DELETE' }); closeModal(); toast('任务已永久删除'); refresh(); } catch (error) { toast(error.message, 'error'); } };
 }
 function openClearArchivedModal() {
-  const form = modal('<h2>清空已废弃任务</h2><p>确定永久删除全部已废弃任务及其会话文件吗？此操作不可恢复。</p><div class="modal-actions"><button class="danger" id="confirm-purge-archived">全部清空</button><button data-close>取消</button></div>');
+  const form = modal('<h2>清空废弃任务</h2><p>确定永久删除全部废弃任务及其会话文件吗？此操作不可恢复。</p><div class="modal-actions"><button class="danger" id="confirm-purge-archived">全部清空</button><button data-close>取消</button></div>');
   $('[data-close]', form).onclick = closeModal;
   $('#confirm-purge-archived', form).onclick = async () => {
     const button = $('#confirm-purge-archived', form);
@@ -966,7 +989,7 @@ function openClearArchivedModal() {
     try {
       const result = await api('/tasks/archived', { method: 'DELETE' });
       closeModal();
-      toast(`已永久删除 ${result.removed || 0} 个已废弃任务`);
+      toast(`已永久删除 ${result.removed || 0} 个废弃任务`);
       refresh();
     } catch (error) {
       button.disabled = false;
@@ -1093,6 +1116,10 @@ function switchModule(module) {
   if (session) {
     rememberCurrentSessionMessage();
     renderSessionTree();
+    // 返回会话页时恢复 xterm 的输入焦点，避免焦点停留在模块切换按钮上。
+    requestAnimationFrame(() => {
+      if (state.module === 'session') terminal?.focus();
+    });
   } else renderList();
 }
 
@@ -1210,6 +1237,15 @@ $('#task-groups').onclick = (event) => {
   const group = event.target.closest('[data-task-filter]');
   if (!group) return;
   state.status = group.dataset.taskFilter || '';
+  applyViewSettings();
+  renderTaskSidebar();
+  renderList();
+  saveLayoutState();
+};
+$('#status-toggle').onclick = () => {
+  if (state.status === 'archived') return;
+  const index = TASK_VIEW_OPTIONS.findIndex((option) => option.value === state.status);
+  state.status = TASK_VIEW_OPTIONS[(index + 1) % TASK_VIEW_OPTIONS.length].value;
   applyViewSettings();
   renderTaskSidebar();
   renderList();

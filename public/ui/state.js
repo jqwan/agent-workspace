@@ -1,7 +1,7 @@
 export const STATUS = {
   unfinished: { label: '未完成', cls: 'unfinished' },
   done: { label: '已完成', cls: 'done' },
-  archived: { label: '已废弃', cls: 'archived' },
+  archived: { label: '废弃', cls: 'archived' },
 };
 
 export const COLORS = {
@@ -76,7 +76,7 @@ export function loadLayoutState() {
   const savedStatus = normalizeViewStatus(saved.status);
   if (VIEW_SETTING_KEYS.includes(savedStatus)) state.status = savedStatus;
 
-  // 将旧版全局设置迁移到“全部任务”和当前分类，避免升级后当前视图突然改变。
+  // 将旧版全局设置迁移到“任务”和当前分类，避免升级后当前视图突然改变。
   const legacy = {};
   if (['single', 'status', 'path', 'color'].includes(saved.boardGroup)) legacy.boardGroup = saved.boardGroup;
   if (['single', 'compact'].includes(saved.boardCardLayout)) legacy.boardCardLayout = saved.boardCardLayout;

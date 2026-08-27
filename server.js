@@ -233,7 +233,7 @@ app.post('/api/tasks', (req, res) => {
 app.put('/api/tasks/:id', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (task.status === 'archived') return res.status(409).json({ error: '已废弃任务不能编辑' });
+  if (task.status === 'archived') return res.status(409).json({ error: '废弃任务不能编辑' });
   const patch = {};
   for (const key of ['title', 'description', 'color', 'deadline']) if (key in (req.body || {})) patch[key] = req.body[key];
   if ('workingDir' in (req.body || {})) {
@@ -269,7 +269,7 @@ app.delete('/api/tasks/:id', async (req, res) => {
 app.post('/api/tasks/:id/restore', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (task.status !== 'archived') return res.status(409).json({ error: '只有已废弃任务可以恢复' });
+  if (task.status !== 'archived') return res.status(409).json({ error: '只有废弃任务可以恢复' });
   const validStatuses = ['unfinished', 'done'];
   const restoredStatus = validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'unfinished';
   res.json({ task: publicTask(updateTask(task.id, { status: restoredStatus, archivedFromStatus: null, archivedAt: null, purgeAt: null })) });

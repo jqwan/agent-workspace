@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap');
 
 :root {
+  --topbar-height: 68px;
   color-scheme: light;
   --bg: #edf1f2;
   --surface: #fbfcfa;
@@ -1020,6 +1021,7 @@ body.theme-geek .brand-copy strong { color: var(--accent); }
 body.theme-geek .toolbar-controls { border-style: dashed; }
 body.theme-geek .task-board-column { border-style: dashed; background: transparent; }
 body.theme-geek .card {
+  overflow: hidden;
   border-top: 0;
   border-right-color: var(--line);
   border-bottom-color: var(--line);
@@ -1125,7 +1127,7 @@ body.theme-classic .topbar { background: color-mix(in srgb, var(--surface) 92%, 
 body.theme-classic .brand-mark { box-shadow: none; }
 body.theme-classic .toolbar-controls { box-shadow: var(--shadow); }
 body.theme-classic .task-board-column { border-radius: 10px; background: color-mix(in srgb, var(--surface) 78%, transparent); }
-body.theme-classic .card { border-radius: 10px; box-shadow: 0 3px 12px rgba(25, 51, 61, .05); }
+body.theme-classic .card { border-radius: 10px; overflow: hidden; box-shadow: 0 3px 12px rgba(25, 51, 61, .05); }
 body.theme-classic .card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(25, 51, 61, .12); }
 body.theme-classic .sidebar-action,
 body.theme-classic .primary { box-shadow: 0 5px 0 color-mix(in srgb, var(--accent-strong) 40%, transparent); }
@@ -1762,7 +1764,7 @@ body.theme-aurora textarea { border-radius: 12px; }
 body.theme-aurora .card,
 body.theme-aurora .task-board-column,
 body.theme-aurora .modal { border-radius: 18px; }
-body.theme-aurora .card { border-color: color-mix(in srgb, var(--accent) 20%, var(--line)); box-shadow: var(--shadow); }
+body.theme-aurora .card { overflow: hidden; border-color: color-mix(in srgb, var(--accent) 20%, var(--line)); box-shadow: var(--shadow); }
 body.theme-aurora .card:hover { transform: translateY(-4px); box-shadow: 0 20px 42px color-mix(in srgb, var(--accent) 18%, transparent); }
 body.theme-aurora .task-board-column { background: color-mix(in srgb, var(--surface) 76%, transparent); box-shadow: var(--shadow); }
 body.theme-aurora .primary { background: linear-gradient(135deg, var(--accent), var(--teal)) !important; border-color: transparent !important; box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 25%, transparent); }
@@ -2004,7 +2006,7 @@ body.theme-dopamine textarea { border-radius: 14px; }
 body.theme-dopamine .card,
 body.theme-dopamine .task-board-column,
 body.theme-dopamine .modal { border-radius: 20px; }
-body.theme-dopamine .card { border-color: color-mix(in srgb, var(--accent) 20%, var(--line)); box-shadow: var(--shadow); }
+body.theme-dopamine .card { overflow: hidden; border-color: color-mix(in srgb, var(--accent) 20%, var(--line)); box-shadow: var(--shadow); }
 body.theme-dopamine .card:hover { transform: translateY(-4px) rotate(-.25deg); box-shadow: 0 22px 42px color-mix(in srgb, var(--accent) 20%, transparent); }
 body.theme-dopamine .task-board-column { background: color-mix(in srgb, var(--surface) 76%, transparent); box-shadow: var(--shadow); }
 body.theme-dopamine .primary { background: linear-gradient(135deg, var(--accent), #ff8c42) !important; border-color: transparent !important; color: #fff !important; box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 28%, transparent); }
@@ -2373,7 +2375,7 @@ body.theme-music .sidebar-action,
 body.theme-music .primary { background: linear-gradient(135deg, var(--accent-strong), var(--accent)) !important; border-color: transparent !important; color: #fff8fc !important; box-shadow: none; }
 body.theme-music .sidebar-action:hover,
 body.theme-music .primary:hover { background: linear-gradient(135deg, var(--accent), var(--teal)) !important; }
-body.theme-music .card { box-shadow: var(--shadow); }
+body.theme-music .card { overflow: hidden; box-shadow: var(--shadow); }
 body.theme-music .card:hover { transform: translateY(-3px); box-shadow: 0 18px 34px color-mix(in srgb, var(--accent) 18%, transparent); }
 
 /* 会话树的绝对定位按钮统一保留垂直居中位移，并提供轻微的按下反馈。 */
@@ -2761,6 +2763,7 @@ body:not(.theme-newspaper) .card.custom-color { background: var(--surface-raised
 /* 默认：编辑手稿的页签色，左侧像一笔彩色铅笔批注。 */
 body.theme-classic .card[class*="color-"] .card-head,
 body.theme-classic .card.custom-color .card-head {
+  border-radius: 0;
   background: linear-gradient(90deg, color-mix(in srgb, var(--category-section-ink) 13%, var(--surface-raised)), var(--surface-raised) 72%);
   box-shadow: inset 5px 0 0 var(--category-section-ink);
 }
@@ -2792,7 +2795,7 @@ body.theme-blueprint .card.custom-color .card-head {
 /* 极光：分类色是玻璃中的一层折光，不使用硬色条。 */
 body.theme-aurora .card[class*="color-"] .card-head,
 body.theme-aurora .card.custom-color .card-head {
-  border-radius: inherit;
+  border-radius: 0;
   background: linear-gradient(105deg, color-mix(in srgb, var(--category-section-ink) 21%, var(--surface-raised)), var(--surface-raised) 64%);
   box-shadow: inset 0 0 20px color-mix(in srgb, var(--category-section-ink) 15%, transparent);
   border-bottom-color: color-mix(in srgb, var(--category-section-ink) 26%, var(--line));
@@ -2800,7 +2803,7 @@ body.theme-aurora .card.custom-color .card-head {
 /* 炫彩：像贴在卡片上的不对称彩色贴纸。 */
 body.theme-dopamine .card[class*="color-"] .card-head,
 body.theme-dopamine .card.custom-color .card-head {
-  border-radius: 15px 6px 0 0;
+  border-radius: 15px 20px 0 0;
   background: linear-gradient(100deg, color-mix(in srgb, var(--category-section-ink) 25%, var(--surface-raised)), color-mix(in srgb, var(--category-section-ink) 8%, var(--surface-raised)));
   box-shadow: inset 6px 0 0 var(--category-section-ink);
   border-bottom-color: color-mix(in srgb, var(--category-section-ink) 32%, var(--line));
@@ -2808,11 +2811,131 @@ body.theme-dopamine .card.custom-color .card-head {
 /* 音乐：setlist 的曲目 cue，色条下方附一小段节拍刻度。 */
 body.theme-music .card[class*="color-"] .card-head,
 body.theme-music .card.custom-color .card-head {
-  border-radius: 10px 10px 0 0;
+  border-radius: 0;
+  border-left: 5px dashed var(--category-section-ink);
   background-image: linear-gradient(90deg, color-mix(in srgb, var(--category-section-ink) 18%, var(--surface-raised)), var(--surface-raised) 68%), repeating-linear-gradient(90deg, var(--category-section-ink) 0 2px, transparent 2px 8px);
   background-position: center, left bottom;
   background-size: auto, 48px 2px;
   background-repeat: no-repeat, repeat-x;
-  box-shadow: inset 4px 0 0 var(--category-section-ink);
+  box-shadow: none;
   border-bottom-color: color-mix(in srgb, var(--category-section-ink) 34%, var(--line));
+}
+
+/* 页面采用独立滚动窗口：顶部栏固定，侧栏和主内容分别响应上下滚动。 */
+html,
+body {
+  height: 100%;
+}
+body {
+  overflow: hidden;
+}
+#workspace-shell {
+  height: calc(var(--app-viewport-height, 100dvh) - var(--topbar-height));
+  min-height: 0;
+  overflow: hidden;
+}
+#app-sidebar {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+#workspace-main {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#task-toolbar {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 3;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px);
+}
+#task-list {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#task-toolbar .toolbar-controls {
+  width: 100%;
+}
+.status-filter-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  line-height: 1;
+}
+.status-filter-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.sidebar-header,
+.sidebar-nav {
+  flex: 0 0 auto;
+}
+.sidebar-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar-action {
+  flex: 0 0 auto;
+}
+.task-groups,
+#session-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+#session-tree {
+  gap: 0;
+}
+.session-task-group {
+  margin: 0 0 2px;
+}
+.sidebar-collapsed .sidebar-panel { display: flex; }
+@media (max-width: 760px) {
+  :root { --topbar-height: 62px; }
+  #workspace-shell {
+    display: flex;
+    flex-direction: column;
+  }
+  #app-sidebar {
+    flex: 0 0 180px;
+    height: 180px;
+    max-height: 180px;
+  }
+  #workspace-main {
+    flex: 1 1 auto;
+    height: auto;
+  }
+  body.session-mode #app-sidebar {
+    flex: 0 0 180px;
+    height: 180px;
+    max-height: 180px;
+  }
 }
