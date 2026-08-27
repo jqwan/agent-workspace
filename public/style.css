@@ -1543,7 +1543,6 @@ body.theme-pixel-arcade button.session-child-delete:hover {
 body.theme-pixel-arcade button.session-new-child:active:not(:disabled),
 body.theme-pixel-arcade button.session-remove-task:active:not(:disabled),
 body.theme-pixel-arcade button.session-child-delete:active:not(:disabled) {
-  transform: translateY(-50%) translate(2px, 2px);
   box-shadow: none;
 }
 body.theme-pixel-arcade .session-title-button { border: 0; border-radius: 0; box-shadow: none; }
@@ -2377,8 +2376,12 @@ body.theme-music .primary:hover { background: linear-gradient(135deg, var(--acce
 body.theme-music .card { box-shadow: var(--shadow); }
 body.theme-music .card:hover { transform: translateY(-3px); box-shadow: 0 18px 34px color-mix(in srgb, var(--accent) 18%, transparent); }
 
-/* 会话删除按钮使用 absolute 居中定位，按下时不再叠加主题的下移动画。 */
-button.session-child-delete:active:not(:disabled) { transform: translateY(-50%) !important; }
+/* 会话树的绝对定位按钮统一保留垂直居中位移，并提供轻微的按下反馈。 */
+button.session-child-delete:active:not(:disabled),
+button.session-new-child:active:not(:disabled),
+button.session-remove-task:active:not(:disabled) {
+  transform: translateY(-50%) translateY(1px) !important;
+}
 body.theme-music .task-board-column { background: color-mix(in srgb, var(--surface) 78%, transparent); box-shadow: var(--shadow); }
 body.theme-music .sidebar-nav-item.active,
 body.theme-music .session-child-session.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); color: var(--accent-strong); }
