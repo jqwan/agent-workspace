@@ -19,7 +19,7 @@
 
 - 对外任务状态为 `unfinished`、`done`、`archived`，界面显示为未完成、已完成、已废弃；历史 `todo` / `running` 以及未知状态加载时统一迁移为 `unfinished`。
 - 任务状态只允许 `unfinished`、`done`、`archived`；是否有正在运行的 pi TUI 由独立的运行状态判断，不由任务状态表示。
-- 删除任务是软删除：设置 `archived`、`archivedAt` 和 `purgeAt`，15 天后才清理 session 文件和任务记录。
+- 删除任务是软删除：设置 `archived` 和 `archivedAt`；任务进入回收站后可恢复，也可手动永久删除。
 - 已废弃任务不应出现在全部任务看板中；恢复后回到未完成状态（如果废弃前为已完成则恢复为已完成）。
 - 任务分类字段是 `color`，有效值为 `red`、`orange`、`yellow`、`green`、`cyan`、`blue`、`purple`、`gray`。不要重新引入 priority/重要程度概念。
 - 新建任务不预建任何会话（`sessions` 为空数组、`sessionFile` 为 null）；点击执行时才创建首个会话（标题「新会话」，随后按首条消息重命名），并把任务级 `sessionFile` 锚定到该会话。删除全部会话后，`sessionFile` 恢复为 null。

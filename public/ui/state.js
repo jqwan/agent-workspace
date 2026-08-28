@@ -16,6 +16,7 @@ export const COLORS = {
 };
 
 const CUSTOM_COLORS_STORAGE_KEY = 'workbench-custom-colors';
+export const MAX_CUSTOM_COLORS = 9;
 const LAYOUT_STORAGE_KEY = 'workbench-layout';
 const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
 
@@ -71,9 +72,18 @@ function loadCustomColors() {
   try {
     const parsed = JSON.parse(localStorage.getItem(CUSTOM_COLORS_STORAGE_KEY) || '{}');
     if (!parsed || typeof parsed !== 'object') return {};
-    return Object.fromEntries(Object.entries(parsed)
+    const entries = Object.entries(parsed)
       .filter(([key, value]) => /^custom-[a-z0-9-]+$/.test(key) && value && /^#[0-9a-f]{6}$/i.test(value.value))
-      .map(([key, value]) => [key, { label: value.value.toUpperCase(), value: value.value.toLowerCase(), createdAt: Number(value.createdAt) || 0 }]));
+      .map(([key, value]) => [key, {
+        label: value.value.toUpperCase(),
+        value: value.value.toLowerCase(),
+        createdAt: Number(value.createdAt) || 0,
+        useCount: Math.max(0, Number(value.useCount) || 0),
+        lastUsedAt: Number(value.lastUsedAt) || 0,
+      }])
+      // 兼容历史数据：超过上限时优先保留使用次数和最近使用时间更高的颜色。
+      .sort(([, a], [, b]) => b.useCount - a.useCount || b.lastUsedAt - a.lastUsedAt || b.createdAt - a.createdAt);
+    return Object.fromEntries(entries.slice(0, MAX_CUSTOM_COLORS));
   } catch { return {}; }
 }
 

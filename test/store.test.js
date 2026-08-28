@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCHIVE_RETENTION_MS, normalizeTasks, normalizeNotes } from '../lib/store.js';
+import { normalizeTasks, normalizeNotes } from '../lib/store.js';
 
 test('normalizeTasks backfills legacy sessions and converts unknown statuses to unfinished', () => {
   const now = new Date('2026-01-01T00:00:00.000Z');
@@ -50,9 +50,9 @@ test('normalizeNotes keeps optional titles and removes notes without description
   assert.equal(result.notes[0].pinnedToTopBar, true);
 });
 
-test('normalizeNotes backfills the 15-day purge deadline for archived notes', () => {
+test('normalizeNotes removes legacy automatic purge deadlines', () => {
   const archivedAt = '2026-01-01T00:00:00.000Z';
-  const result = normalizeNotes([{ id: 'archived-note', description: '已废弃', status: 'archived', archivedAt }]);
+  const result = normalizeNotes([{ id: 'archived-note', description: '已废弃', status: 'archived', archivedAt, purgeAt: '2026-01-16T00:00:00.000Z' }]);
   assert.equal(result.notes[0].archivedAt, archivedAt);
-  assert.equal(result.notes[0].purgeAt, new Date(new Date(archivedAt).getTime() + ARCHIVE_RETENTION_MS).toISOString());
+  assert.equal(Object.hasOwn(result.notes[0], 'purgeAt'), false);
 });

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
   ROOT, DATA_DIR, SESSIONS_DIR, CONFIG_FILE,
-  ARCHIVE_RETENTION_MS, loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, listNotes, getNote, createNote, updateNote, deleteNote, reorderNotes, subscribeTasks,
+  loadTasks, saveTasks, listTasks, getTask, createTask, updateTask, deleteTask, listNotes, getNote, createNote, updateNote, deleteNote, reorderNotes, subscribeTasks,
 } from './lib/store.js';
 import { parseSessionFile, extractText } from './lib/session.js';
 import { unreadAssistantMessages, messageTime, sessionUnreadCount, nextReadState } from './lib/unread.js';
@@ -160,20 +160,6 @@ function removeTaskFiles(task) {
 async function stopTaskTui(taskId, options) {
   return stopWebTuiAndWait(taskId, options);
 }
-async function purgeArchivedItems() {
-  const cutoff = Date.now();
-  for (const task of listTasks()) {
-    if (task.status !== 'archived' || !task.purgeAt || new Date(task.purgeAt).getTime() > cutoff) continue;
-    await stopTaskTui(task.id, { silent: true });
-    removeTaskFiles(task);
-    activeSessionIds.delete(task.id);
-    deleteTask(task.id);
-  }
-  for (const note of listNotes()) {
-    if (note.status !== 'archived' || !note.purgeAt || new Date(note.purgeAt).getTime() > cutoff) continue;
-    deleteNote(note.id);
-  }
-}
 function withTuiLock(taskId, action) {
   const previous = tuiOpenings.get(taskId) || Promise.resolve();
   const current = previous.catch(() => {}).then(action);
@@ -247,18 +233,31 @@ app.delete('/api/notes/:id', (req, res) => {
   const note = getNote(req.params.id);
   if (!note) return res.status(404).json({ error: '便签不存在' });
   const archivedAt = nowIso();
-  const purgeAt = new Date(Date.now() + ARCHIVE_RETENTION_MS).toISOString();
-  res.json({ note: publicNote(updateNote(note.id, { status: 'archived', archivedAt, purgeAt })) });
+  res.json({ note: publicNote(updateNote(note.id, { status: 'archived', archivedAt })) });
 });
 app.post('/api/notes/:id/restore', (req, res) => {
   const note = getNote(req.params.id);
   if (!note) return res.status(404).json({ error: '便签不存在' });
   if (note.status !== 'archived') return res.status(409).json({ error: '只有废弃便签可以恢复' });
-  res.json({ note: publicNote(updateNote(note.id, { status: 'active', archivedAt: null, purgeAt: null })) });
+  res.json({ note: publicNote(updateNote(note.id, { status: 'active', archivedAt: null })) });
 });
 app.delete('/api/notes/:id/permanent', (req, res) => {
   if (!deleteNote(req.params.id)) return res.status(404).json({ error: '便签不存在' });
   res.json({ ok: true });
+});
+
+app.delete('/api/archived', async (req, res) => {
+  const type = ['all', 'tasks', 'notes'].includes(req.body?.type) ? req.body.type : 'all';
+  const archivedTasks = type === 'notes' ? [] : listTasks().filter((task) => task.status === 'archived');
+  for (const task of archivedTasks) {
+    await stopTaskTui(task.id, { silent: true });
+    removeTaskFiles(task);
+    activeSessionIds.delete(task.id);
+    deleteTask(task.id);
+  }
+  const archivedNotes = type === 'tasks' ? [] : listNotes().filter((note) => note.status === 'archived');
+  for (const note of archivedNotes) deleteNote(note.id);
+  res.json({ removed: archivedTasks.length + archivedNotes.length });
 });
 
 // 会话栏中的便签始终以当前会话为上下文，不保存任务或子会话关联。
@@ -349,10 +348,9 @@ app.delete('/api/tasks/:id', async (req, res) => {
   for (const child of taskSessions(task)) killPi(child.sessionFile);
   activeSessionIds.delete(task.id);
   const archivedAt = nowIso();
-  const purgeAt = new Date(Date.now() + ARCHIVE_RETENTION_MS).toISOString();
   const validStatuses = ['unfinished', 'done'];
   const archivedFromStatus = validStatuses.includes(task.status) ? task.status : (validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'unfinished');
-  res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedFromStatus, archivedAt, purgeAt })) });
+  res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedFromStatus, archivedAt })) });
 });
 app.post('/api/tasks/:id/restore', (req, res) => {
   const task = getTask(req.params.id);
@@ -360,7 +358,7 @@ app.post('/api/tasks/:id/restore', (req, res) => {
   if (task.status !== 'archived') return res.status(409).json({ error: '只有废弃任务可以恢复' });
   const validStatuses = ['unfinished', 'done'];
   const restoredStatus = validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'unfinished';
-  res.json({ task: publicTask(updateTask(task.id, { status: restoredStatus, archivedFromStatus: null, archivedAt: null, purgeAt: null })) });
+  res.json({ task: publicTask(updateTask(task.id, { status: restoredStatus, archivedFromStatus: null, archivedAt: null })) });
 });
 app.delete('/api/tasks/:id/permanent', async (req, res) => {
   const task = getTask(req.params.id);
@@ -582,10 +580,8 @@ app.post('/api/config', (req, res) => {
   res.json(config);
 });
 
-setInterval(() => { void purgeArchivedItems(); }, 60 * 60 * 1000);
 loadTasks();
 initializeSessionReadState();
-void purgeArchivedItems();
 const server = app.listen(config.port, '127.0.0.1', () => console.log(`[workbench] http://127.0.0.1:${config.port}`));
 server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
