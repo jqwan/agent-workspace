@@ -65,6 +65,16 @@ app.use('/vendor/xterm', express.static(path.join(ROOT, 'node_modules', '@xterm'
 app.use('/vendor/xterm-fit', express.static(path.join(ROOT, 'node_modules', '@xterm', 'addon-fit', 'lib')));
 app.use(express.static(path.join(ROOT, 'public')));
 
+app.post('/api/client-log', (req, res) => {
+  const message = String(req.body?.message || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+  if (!message) return res.status(400).json({ error: '日志内容不能为空' });
+  const isError = req.body?.type === 'error';
+  const output = `[workbench${isError ? ' error' : ''}] ${message}`;
+  if (isError) console.error(output);
+  else console.log(output);
+  res.json({ ok: true });
+});
+
 function nowIso() { return new Date().toISOString(); }
 function taskSessions(task) {
   if (!Array.isArray(task.sessions)) {
@@ -170,7 +180,6 @@ function withTuiLock(taskId, action) {
 }
 async function openTaskTui(task, childSession, cols, rows, theme, { activateSession = true } = {}) {
   if (!childSession) throw new Error('任务没有可用子会话');
-  if (task.status === 'archived') throw new Error('当前任务状态不能打开原生 TUI');
   // 已有 session 以 JSONL header 中记录的 cwd 为准；任务目录只作为新 session 的默认值。
   const sessionCwd = parseSessionFile(childSession.sessionFile).header?.cwd;
   const workingDir = resolveWorkingDir(sessionCwd || task.workingDir);
@@ -406,7 +415,6 @@ app.get('/api/tasks/:id/sessions', (req, res) => {
 app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (task.status === 'archived') return res.status(409).json({ error: '当前任务状态不能新建会话' });
   const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);
@@ -477,7 +485,6 @@ webSockets.on('connection', (ws) => {
     if (!task) return send({ type: 'tui_error', error: '任务不存在' });
     const childSession = resolveTaskSession(task, requestedSessionId);
     if (!childSession) return send({ type: 'tui_error', error: '子会话不存在' });
-    if (task.status === 'archived') return send({ type: 'tui_error', error: '当前任务状态不能打开原生 TUI' });
     if (!isWebTuiRunning(task.id) && concurrencyFull(1)) return send({ type: 'tui_error', error: `已达到并发上限：${config.maxConcurrent}` });
     try {
       await withTuiLock(id, () => openTaskTui(getTask(id), childSession, cols, rows, theme));

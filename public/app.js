@@ -57,11 +57,11 @@ let terminalImeInputStyle = null;
 let tuiOpening = null;
 let modalRestoreFocus = null;
 let sessionTaskDetailsOpen = false;
+let sessionActionMenuOpen = false;
 let marqueeMotionFrame = null;
-let marqueeNoticeTimer = null;
-let marqueeNotice = null;
 let marqueeCurrentContent = null;
 let renderedPinnedNotesSignature = '';
+let renderedSessionTreeSignature = '';
 let sessionTreeClickTimer = null;
 let noteDragTimer = null;
 let noteDrag = null;
@@ -157,9 +157,79 @@ function applySidebarCollapsed(collapsed) {
   button.title = collapsed ? '展开侧边栏' : '收起侧边栏';
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-expanded', String(!collapsed));
+  if (!button.querySelector('.sidebar-toggle-line')) {
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="3"/><path class="sidebar-toggle-line" d="M9 3v18"/></svg>';
+  }
 }
+
+// 工作区导航记录的是“看过的界面”，不干涉任务内容和终端内的 undo/redo。
+const workspaceHistory = { entries: [], index: -1, restoring: false };
+function workspaceViewSnapshot() {
+  return {
+    module: state.module,
+    boardType: state.boardType,
+    status: state.status,
+    archiveType: state.archiveType,
+    noteFilter: state.noteFilter,
+    sessionTask: state.module === 'session' ? state.sessionTask : null,
+    sessionSessionId: state.module === 'session' ? state.sessionSessionId : null,
+  };
+}
+function sameWorkspaceView(a, b) {
+  return Boolean(a && b && ['module', 'boardType', 'status', 'archiveType', 'noteFilter', 'sessionTask', 'sessionSessionId'].every((key) => a[key] === b[key]));
+}
+function syncWorkspaceHistoryControls() {
+  const back = $('#workspace-back');
+  const forward = $('#workspace-forward');
+  if (!back || !forward) return;
+  back.disabled = workspaceHistory.index <= 0;
+  forward.disabled = workspaceHistory.index < 0 || workspaceHistory.index >= workspaceHistory.entries.length - 1;
+  back.title = back.disabled ? '' : '返回（Alt+←）';
+  forward.title = forward.disabled ? '' : '前进（Alt+→）';
+  back.setAttribute('aria-disabled', String(back.disabled));
+  forward.setAttribute('aria-disabled', String(forward.disabled));
+}
+function recordWorkspaceView() {
+  if (workspaceHistory.restoring) return;
+  const snapshot = workspaceViewSnapshot();
+  if (sameWorkspaceView(workspaceHistory.entries[workspaceHistory.index], snapshot)) return;
+  workspaceHistory.entries.splice(workspaceHistory.index + 1);
+  workspaceHistory.entries.push(snapshot);
+  workspaceHistory.index = workspaceHistory.entries.length - 1;
+  syncWorkspaceHistoryControls();
+}
+async function restoreWorkspaceView(snapshot) {
+  workspaceHistory.restoring = true;
+  try {
+    state.boardType = snapshot.boardType;
+    state.status = snapshot.status;
+    state.archiveType = snapshot.archiveType;
+    state.noteFilter = snapshot.noteFilter;
+    applyViewSettings();
+    if (snapshot.module === 'session') {
+      if (snapshot.sessionTask && currentTask(snapshot.sessionTask)) await selectSession(snapshot.sessionTask, snapshot.sessionSessionId, { record: false });
+      else await selectSession(null, null, { record: false });
+    } else {
+      switchModule('tasks');
+      saveLayoutState();
+    }
+  } finally {
+    workspaceHistory.restoring = false;
+    syncWorkspaceHistoryControls();
+  }
+}
+async function moveWorkspaceHistory(delta) {
+  const nextIndex = workspaceHistory.index + delta;
+  const snapshot = workspaceHistory.entries[nextIndex];
+  if (!snapshot) return;
+  workspaceHistory.index = nextIndex;
+  syncWorkspaceHistoryControls();
+  await restoreWorkspaceView(snapshot);
+}
+
 // 通知消息框每次只播放一条便签，过长内容截断以保持轨道稳定。
 const MARQUEE_MAX_MESSAGE_CHARS = 300;
+const TITLE_MARQUEE_SPEED = 28; // px/s，标题滚动采用恒定的像素速度
 const SORT_OPTIONS = [
   { value: 'updated', label: '最近更新', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg>' },
   { value: 'created', label: '创建时间', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 4v3M16 4v3M4 9.5h16M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/></svg>' },
@@ -186,7 +256,7 @@ function syncTaskToolbarTitle() {
     kicker = 'WORKSPACE / NOTES';
   }
   $('#task-view-title').textContent = title;
-  $('.section-kicker', $('#task-toolbar')).textContent = kicker;
+  $('#workspace-page-kicker').textContent = kicker;
   const clearArchivedButton = $('#purge-archived');
   if (clearArchivedButton) {
     const archivedTaskCount = state.tasks.filter((task) => task.status === 'archived').length;
@@ -221,25 +291,71 @@ syncBoardFilter();
 syncSortControl();
 syncCardLayoutControl();
 $('#search').value = state.search;
+workspaceHistory.entries = [workspaceViewSnapshot()];
+workspaceHistory.index = 0;
+syncWorkspaceHistoryControls();
+$('#workspace-back').onclick = () => { void moveWorkspaceHistory(-1); };
+$('#workspace-forward').onclick = () => { void moveWorkspaceHistory(1); };
+document.addEventListener('keydown', (event) => {
+  if ($('.modal') || event.defaultPrevented) return;
+  const target = event.target;
+  const typing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable;
+  if (typing) return;
+  const back = (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === 'ArrowLeft')
+    || (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === '[');
+  const forward = (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === 'ArrowRight')
+    || (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === ']');
+  if (!back && !forward) return;
+  event.preventDefault();
+  void moveWorkspaceHistory(back ? -1 : 1);
+});
 window.addEventListener('resize', () => { syncViewportHeight(); syncMasonryColumns(); syncOverflowTooltips(); });
 window.addEventListener('pagehide', saveLayoutState);
 window.visualViewport?.addEventListener('resize', syncViewportHeight);
 
+// 将原 Toast 内容输出到运行后端的终端，不再显示浏览器弹窗。
 function toast(message, type = '') {
-  // 通知直接占用弹幕框，不再额外生成覆盖层 Toast。
-  marqueeNotice = { message: String(message || ''), type };
-  clearTimeout(marqueeNoticeTimer);
-  renderMarquee();
-  marqueeNoticeTimer = setTimeout(() => {
-    marqueeNotice = null;
-    renderMarquee();
-  }, 3000);
+  const text = String(message || '').trim();
+  if (!text) return;
+  void api('/client-log', { method: 'POST', body: { message: text, type } }).catch(() => {});
 }
 function currentTask(id) { return state.tasks.find((task) => task.id === id); }
 function currentNote(id) { return state.notes.find((note) => note.id === id); }
+const LAST_OPENED_SESSION_KEY = 'workbench-last-opened-session';
+function rememberLastOpenedSession(taskId, sessionId) {
+  if (!taskId || !sessionId) return;
+  try { localStorage.setItem(LAST_OPENED_SESSION_KEY, JSON.stringify({ taskId, sessionId })); } catch { /* ignore unavailable browser storage */ }
+}
+function storedLastOpenedSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAST_OPENED_SESSION_KEY) || 'null');
+    if (saved && typeof saved.taskId === 'string' && typeof saved.sessionId === 'string') return saved;
+  } catch { /* ignore malformed browser data */ }
+  return null;
+}
+function findLastOpenedSession() {
+  const candidates = [
+    { taskId: state.sessionTask, sessionId: state.sessionSessionId },
+    storedLastOpenedSession(),
+  ];
+  return candidates.find((candidate) => {
+    const task = candidate && currentTask(candidate.taskId);
+    return task && availableSessions(task).some((session) => session.id === candidate.sessionId);
+  }) || null;
+}
 function noteInitial(note) {
   const source = `${note?.title || ''} ${note?.description || ''}`.trim();
-  return [...source].find((char) => /[\p{Script=Han}A-Za-z]/u.test(char)) || [...source][0] || '便';
+  const chars = [...source].filter((char) => !/\s/u.test(char));
+  if (!chars.length) return { primary: '', secondary: '' };
+  const firstIsChinese = /\p{Script=Han}/u.test(chars[0]);
+  const secondIsChinese = /\p{Script=Han}/u.test(chars[1] || '');
+  // 首字符是中文，或第二字符是中文时，都只显示首字符；仅前两个字符都非中文时显示双字符缩写。
+  return { primary: chars[0], secondary: !firstIsChinese && !secondIsChinese ? (chars[1] || '') : '' };
+}
+function noteInitialMarkup(note) {
+  const { primary, secondary } = noteInitial(note);
+  if (!primary && !secondary) return '';
+  return `<span class="note-initial"><span class="note-initial-primary">${esc(primary)}</span>${secondary ? `<span class="note-initial-secondary">${esc(secondary)}</span>` : ''}</span>`;
 }
 function noteLabel(note) { return note?.title ? `${note.title}：${note.description}` : note?.description || ''; }
 function orderedPinnedNotes(flag, orderKey) {
@@ -276,11 +392,11 @@ function startMarqueeMotion(root, track) {
   marqueeMotionFrame = requestAnimationFrame(tick);
 }
 function sampleMarqueeMessage() {
-  // 蓄水池抽样只保留一条，避免便签数量影响通知消息框的 DOM 大小。
+  // 蓄水池抽样只保留一条未废弃便签，避免便签数量影响通知消息框的 DOM 大小。
   let selected = null;
   let candidateCount = 0;
   for (const note of state.notes) {
-    if (note.status === 'archived' || note.pinnedToSessionBar) continue;
+    if (note.status === 'archived') continue;
     candidateCount += 1;
     if (Math.floor(Math.random() * candidateCount) === 0) selected = note;
   }
@@ -292,14 +408,6 @@ function renderMarquee() {
   stopMarqueeMotion();
   const root = $('#note-marquee');
   const shell = $('#toast-root');
-  if (marqueeNotice) {
-    root.classList.remove('empty'); shell.classList.remove('notification-empty');
-    root.classList.add('notice');
-    root.classList.toggle('error', marqueeNotice.type === 'error');
-    root.removeAttribute('aria-hidden');
-    root.innerHTML = `<span class="note-marquee-track notice-text">${esc(marqueeNotice.message)}</span>`;
-    return;
-  }
   root.classList.remove('notice', 'error');
   root.setAttribute('aria-hidden', 'true');
   const sampled = marqueeCurrentContent || sampleMarqueeMessage();
@@ -317,14 +425,19 @@ function renderMarquee() {
   track.style.transform = `translate3d(${root.clientWidth}px, 0, 0)`;
   requestAnimationFrame(() => startMarqueeMotion(root, track));
 }
+function renderTopbarNoteButtons() {
+  const root = $('#topbar-note-buttons');
+  if (!root) return;
+  const notes = orderedPinnedNotes('pinnedToTopBar', 'topbarOrder');
+  root.innerHTML = `<button type="button" class="note-button note-add-button" data-new-topbar-note aria-label="新建提醒便签" title="新建提醒便签">＋</button>${notes.map((note) => `<button type="button" class="note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-topbar-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="topbar" aria-label="${esc(noteLabel(note))}" title="${esc(noteLabel(note))}">${noteInitialMarkup(note)}</button>`).join('')}<section id="topbar-note-panel" class="session-description-panel topbar-note-panel hidden" aria-label="便签详情"></section>`;
+}
 function renderPinnedNotes() {
   // 会话输出也会触发 refresh；仅在便签自身变化时重绘，不能重启动画。
   const signature = JSON.stringify(state.notes.map((note) => [note.id, note.updatedAt, note.status, note.title, note.description, note.color, note.pinnedToTopBar, note.pinnedToSessionBar, note.topbarOrder, note.sessionOrder]));
   if (signature === renderedPinnedNotesSignature) return;
   renderedPinnedNotesSignature = signature;
   marqueeCurrentContent = null;
-  const topNotes = orderedPinnedNotes('pinnedToTopBar', 'topbarOrder');
-  $('#topbar-note-buttons').innerHTML = `${topNotes.map((note) => `<button type="button" class="note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-topbar-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="topbar" aria-label="${esc(noteLabel(note))}" title="${esc(noteLabel(note))}">${esc(noteInitial(note))}</button>`).join('')}<button type="button" class="note-button note-add-button" data-new-topbar-note aria-label="新建提醒便签" title="新建提醒便签">＋</button><section id="topbar-note-panel" class="session-description-panel topbar-note-panel hidden" aria-label="便签详情"></section>`;
+  renderTopbarNoteButtons();
   renderMarquee();
 }
 function renderSessionNoteButtons() {
@@ -332,7 +445,7 @@ function renderSessionNoteButtons() {
   if (!root) return;
   closeSessionNoteMenu();
   const notes = orderedPinnedNotes('pinnedToSessionBar', 'sessionOrder');
-  root.innerHTML = `${notes.map((note) => `<button type="button" class="note-button session-note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-session-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="session" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="选择发送方式">${esc(noteInitial(note))}</button>`).join('')}<button type="button" class="note-button note-add-button" data-new-session-note aria-label="新建会话便签" title="新建会话便签">＋</button>`;
+  root.innerHTML = `<button type="button" class="note-button note-add-button" data-new-session-note aria-label="新建会话便签" title="新建会话便签">＋</button>${notes.map((note) => `<button type="button" class="note-button session-note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-session-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="session" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="选择发送方式">${noteInitialMarkup(note)}</button>`).join('')}`;
 }
 function sessionMarkerKey(taskId, sessionId) { return `${taskId}\u0000${sessionId}`; }
 function rememberCurrentSessionMessage() {
@@ -354,6 +467,7 @@ function syncMasonryColumns(root = document) {
     list.style.columnCount = String(Math.min(count, maxColumns));
   });
 }
+const titleAnimations = new WeakMap();
 function nativeTooltip(value) {
   return String(value || '').split('\n').map((line) => {
     const chars = [...line];
@@ -363,15 +477,66 @@ function nativeTooltip(value) {
     return lines.join('\n');
   }).join('\n');
 }
+function titleIsHovered(node) {
+  const owner = node.closest('.session-task-heading, .session-child-session, .session-title-row');
+  return Boolean(owner && (owner.matches(':hover') || owner.matches(':focus-within')));
+}
+function syncTitleMarquee(node, overflowing) {
+  const current = titleAnimations.get(node);
+  if (!overflowing || !titleIsHovered(node) || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    current?.animation.cancel();
+    titleAnimations.delete(node);
+    return;
+  }
+  const distance = Math.max(0, node.scrollWidth - node.clientWidth);
+  if (current?.distance === distance) return;
+  current?.animation.cancel();
+  // 从当前位置立即开始匀速滚动，避免悬浮时先向后“弹”一下。
+  const animation = node.animate([
+    { transform: 'translateX(0)' },
+    { transform: `translateX(${-distance}px)` },
+  ], { duration: (distance / TITLE_MARQUEE_SPEED) * 1000, iterations: Infinity, direction: 'alternate', easing: 'linear', fill: 'both' });
+  titleAnimations.set(node, { animation, distance });
+}
 function syncOverflowTooltips(root = document) {
   root.querySelectorAll('[data-tooltip]').forEach((node) => {
     const overflowing = node.scrollWidth > node.clientWidth || node.scrollHeight > node.clientHeight + 1;
-    node.title = overflowing ? nativeTooltip(node.dataset.tooltip) : '';
+    const scrollingTitle = node.matches('.session-title-text');
+    // 侧栏标题用悬停滚动展示全文，不再触发浏览器原生全文提示框。
+    node.title = scrollingTitle ? '' : (overflowing ? nativeTooltip(node.dataset.tooltip) : '');
     node.classList.toggle('is-overflowing', overflowing);
+    node.closest('.session-title-text-viewport')?.classList.toggle('is-overflowing', scrollingTitle && overflowing);
+    if (scrollingTitle) syncTitleMarquee(node, overflowing);
   });
 }
 const overflowTooltipObserver = new MutationObserver(() => requestAnimationFrame(() => syncOverflowTooltips()));
 overflowTooltipObserver.observe(document.body, { childList: true, subtree: true });
+// 悬停时右侧操作按钮会出现并触发布局过渡；等过渡结束后再测量，避免动画先按旧宽度前进、再被重置后退。
+document.addEventListener('mouseover', (event) => {
+  const item = event.target.closest('.session-task-heading, .session-child-session, .session-title-row');
+  if (item) setTimeout(() => syncOverflowTooltips(item), 180);
+});
+document.addEventListener('focusin', (event) => {
+  const item = event.target.closest('.session-task-heading, .session-child-session, .session-title-row');
+  if (item) setTimeout(() => syncOverflowTooltips(item), 180);
+});
+document.addEventListener('mouseout', (event) => {
+  const item = event.target.closest('.session-task-heading, .session-child-session, .session-title-row');
+  if (!item || item.contains(event.relatedTarget)) return;
+  requestAnimationFrame(() => syncOverflowTooltips(item));
+});
+document.addEventListener('focusout', (event) => {
+  const item = event.target.closest('.session-task-heading, .session-child-session, .session-title-row');
+  if (!item || item.contains(event.relatedTarget)) return;
+  requestAnimationFrame(() => syncOverflowTooltips(item));
+});
+document.addEventListener('transitionend', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element) || event.propertyName !== 'padding-right') return;
+  if (!target.matches('.session-task-title, .session-child-open')) return;
+  const item = target.closest('.session-task-heading, .session-child-session');
+  if (item) syncOverflowTooltips(item);
+});
 function renderStats() {
   const counts = { unfinished: 0, done: 0 };
   let overdue = 0;
@@ -450,7 +615,7 @@ function actionButton(action, id, label, iconName, className = '', pressed = nul
   return `<button type="button" class="icon-button ${className}" data-action="${action}" data-id="${esc(id)}" title="${label}" aria-label="${label}"${pressedAttribute}>${ACTION_ICONS[iconName]}</button>`;
 }
 function actions(task) {
-  if (task.status === 'archived') return `${actionButton('restore', task.id, '恢复任务', 'restore')}${actionButton('purge', task.id, '永久删除', 'purge', 'danger')}`;
+  if (task.status === 'archived') return `${actionButton('open-archived-session', task.id, '打开会话', 'open', 'primary')}${actionButton('restore', task.id, '恢复任务', 'restore')}${actionButton('purge', task.id, '永久删除', 'purge', 'danger')}`;
   if (task.status === 'unfinished') {
     const openAction = availableSessions(task).length ? 'session' : 'execute';
     return `${actionButton(openAction, task.id, '打开会话', 'open', 'primary')}${actionButton('complete', task.id, '标记完成', 'complete')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
@@ -626,28 +791,37 @@ function showSessionTask(taskId) {
   saveLayoutState();
 }
 function sessionTasks() {
-  return state.tasks.filter((task) => task.status !== 'archived' && (availableSessions(task).length > 0 || state.sessionTaskIds.has(task.id)) && !state.hiddenCompletedSessionTasks.has(task.id));
+  return state.tasks.filter((task) => (availableSessions(task).length > 0 || state.sessionTaskIds.has(task.id)) && !state.hiddenCompletedSessionTasks.has(task.id));
 }
 function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
   renderSessionNoteButtons();
   $('#session-view').classList.toggle('no-session', !task);
   const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
-  const sessionTitle = task?.title || '选择一个子会话';
-  const sessionName = child ? (child.title || '新会话') : '';
-  $('#session-title').textContent = sessionTitle;
-  $('#session-title').dataset.tooltip = sessionTitle;
-  syncOverflowTooltips($('#session-title').parentElement);
-  requestAnimationFrame(() => syncOverflowTooltips($('#session-title').parentElement));
+  const sessionName = child ? (child.title || '新会话') : (task ? '新会话' : '选择一个子会话');
   $('#session-name').textContent = sessionName;
-  $('#session-name').title = sessionName || '会话名称';
-  $('#copy-session-file').disabled = !child?.sessionFile;
-  if (!task) sessionTaskDetailsOpen = false;
-  $('#session-title').disabled = !task;
-  $('#session-title').setAttribute('aria-expanded', String(Boolean(task && sessionTaskDetailsOpen)));
+  $('#session-name').dataset.tooltip = sessionName;
+  syncOverflowTooltips($('#session-name').parentElement);
+  requestAnimationFrame(() => syncOverflowTooltips($('#session-name').parentElement));
+  if (!task) {
+    sessionTaskDetailsOpen = false;
+    sessionActionMenuOpen = false;
+  }
+  const sessionActionsButton = $('#copy-session-file');
+  const actionMenu = $('#session-action-menu');
+  const description = task?.description?.trim() || '';
+  const sessionPath = child?.sessionFile || '';
+  sessionActionsButton.disabled = !task;
+  sessionActionsButton.title = task ? '会话操作' : '暂无会话操作';
+  sessionActionsButton.setAttribute('aria-label', sessionActionsButton.title);
+  sessionActionsButton.setAttribute('aria-expanded', String(Boolean(task && sessionActionMenuOpen)));
+  actionMenu.classList.toggle('hidden', !task || !sessionActionMenuOpen);
+  $('#session-action-copy-command').disabled = !sessionPath;
+  $('#session-action-copy-description').disabled = !description;
   $('#session-task-details-panel').classList.toggle('hidden', !task || !sessionTaskDetailsOpen);
-  $('#session-working-dir').textContent = task?.workingDir || '未设置工作路径';
-  $('#session-description-text').textContent = task?.description?.trim() || '暂无任务描述';
+  $('#session-task-title-detail').textContent = task?.title || '暂无任务标题';
+  $('#session-description-text').textContent = description || '暂无任务描述';
+  $('#session-file-path-detail').textContent = sessionPath || '暂无会话文件路径';
   $('#session-task-select').innerHTML = '<option value="">选择一个任务会话</option>' + sessionTasks().filter((item) => availableSessions(item).length > 0).map((item) => `<option value="${item.id}"${item.id === state.sessionTask ? ' selected' : ''}>${esc(item.title)}</option>`).join('');
 }
 function closeSessionTaskDetails() {
@@ -655,19 +829,66 @@ function closeSessionTaskDetails() {
   sessionTaskDetailsOpen = false;
   renderSessionHeader();
 }
+function closeSessionActionMenu() {
+  if (!sessionActionMenuOpen) return;
+  sessionActionMenuOpen = false;
+  const menu = $('#session-action-menu');
+  const button = $('#copy-session-file');
+  menu?.classList.add('hidden');
+  button?.setAttribute('aria-expanded', 'false');
+}
+function syncSessionTreeUnread(tasks) {
+  const root = $('#session-tree');
+  for (const task of tasks) {
+    for (const session of availableSessions(task)) {
+      const row = [...root.querySelectorAll('.session-child-session')].find((item) => item.dataset.sessionTask === task.id && item.dataset.sessionId === session.id);
+      if (!row) continue;
+      const current = state.module === 'session' && state.sessionTask === task.id && state.sessionSessionId === session.id;
+      const unread = current ? 0 : (Number(session.unreadCount) || 0);
+      const title = session.title || '新会话';
+      const unreadLabel = unread > 99 ? '99+' : String(unread);
+      row.querySelector('.child-dot')?.classList.toggle('has-unread', unread > 0);
+      row.querySelector('.session-child-open')?.setAttribute('aria-label', `${title}${unread ? `，${unreadLabel}条未读消息` : ''}`);
+    }
+  }
+}
+function sessionItemMarkup(task, session, index) {
+  const title = session.title || `子会话 ${index + 1}`;
+  const current = state.module === 'session' && state.sessionTask === task.id && state.sessionSessionId === session.id;
+  const unread = current ? 0 : (Number(session.unreadCount) || 0);
+  const unreadLabel = unread > 99 ? '99+' : String(unread);
+  return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-title-text-viewport"><span class="session-child-name session-title-text" data-tooltip="${esc(title)}">${esc(title)}</span></span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`;
+}
+function sessionGroupMarkup(task) {
+  const collapsed = state.collapsedSessionTasks.has(task.id);
+  const colorKey = taskColor(task);
+  const customClass = customColors[colorKey] ? ' custom-color' : '';
+  const taskActions = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
+  const sessions = availableSessions(task).map((session, index) => sessionItemMarkup(task, session, index)).join('');
+  const items = collapsed ? '' : sessions;
+  return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text task-status-${esc(task.status)}" data-tooltip="${esc(task.title)}">${esc(task.title)}</span></span></button>${taskActions}</div>${items}</div>`;
+}
 function renderSessionTree() {
   renderSessionHeader();
   const tasks = sessionTasks();
-  $('#session-tree').innerHTML = tasks.length ? tasks.map((task) => {
-    const collapsed = state.collapsedSessionTasks.has(task.id);
-    const sessions = availableSessions(task);
-    const colorKey = taskColor(task);
-    const customClass = customColors[colorKey] ? ' custom-color' : '';
-    const taskAction = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
-    const sessionItems = sessions.map((session, index) => { const title = session.title || `子会话 ${index + 1}`; const current = state.sessionTask === task.id && state.sessionSessionId === session.id; const unread = current ? 0 : (Number(session.unreadCount) || 0); const unreadLabel = unread > 99 ? '99+' : String(unread); return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-child-name" data-tooltip="${esc(title)}">${esc(title)}</span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`; }).join('');
-    return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span data-tooltip="${esc(task.title)}">${esc(task.title)}</span></button>${taskAction}</div>${collapsed ? '' : sessionItems}</div>`;
-  }).join('') : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
+  // 终端输入/输出也会触发刷新；树结构未变化时不要重建 DOM，避免标题滚动动画从头开始。
+  const treeSignature = JSON.stringify({
+    module: state.module,
+    sessionTask: state.sessionTask,
+    sessionSessionId: state.sessionSessionId,
+    collapsed: [...state.collapsedSessionTasks].sort(),
+    tasks: tasks.map((task) => [task.id, task.title, task.status, task.color, availableSessions(task).map((session) => [session.id, session.title])]),
+  });
+  if (treeSignature === renderedSessionTreeSignature) {
+    syncSessionTreeUnread(tasks);
+    return;
+  }
+  renderedSessionTreeSignature = treeSignature;
+  $('#session-tree').innerHTML = tasks.length
+    ? tasks.map(sessionGroupMarkup).join('')
+    : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
   syncOverflowTooltips($('#session-tree'));
+  syncSessionTreeUnread(tasks);
 }
 async function refresh() {
   try {
@@ -704,7 +925,7 @@ async function refresh() {
       if (state.module === 'session') {
         switchModule('session');
         const task = currentTask(state.sessionTask);
-        if (task && sessionTasks().some((item) => item.id === task.id) && availableSessions(task).length > 0) selectSession(task.id, state.sessionSessionId);
+        if (task && sessionTasks().some((item) => item.id === task.id) && availableSessions(task).length > 0) selectSession(task.id, state.sessionSessionId, { record: false });
         else {
           state.sessionTask = null;
           state.sessionSessionId = null;
@@ -886,7 +1107,6 @@ async function openNativeTui() {
   const task = currentTask(taskId);
   if (!task) return toast('请先选择一个会话', 'error');
   const session = availableSessions(task).find((item) => item.id === sessionId);
-  if (task.status === 'archived') return toast('当前任务不能打开会话', 'error');
   if (!session) return toast('没有可用的历史会话', 'error');
   tuiOpening = (async () => {
     detachTui();
@@ -977,7 +1197,6 @@ async function openNativeTui() {
             const error = event.error || '终端错误';
             // Ignore stale frames emitted while a PTY is already exiting.
             if (error === '会话未运行') return;
-            queueTerminalWrite(`\r\n[工作台] ${error}\r\n`);
             toast(error, 'error');
           }
         } catch { /* ignore malformed frames */ }
@@ -1010,7 +1229,7 @@ async function restartTuiForTheme() {
   if (!state.sessionTask || !tuiSocket) return;
   await restartCurrentTui('主题已切换，正在重启会话…');
 }
-function selectSession(taskId, sessionId = null) {
+function selectSession(taskId, sessionId = null, { record = true } = {}) {
   if (state.module !== 'session') switchModule('session');
   const task = currentTask(taskId);
   const target = availableSessions(task).find((session) => session.id === sessionId);
@@ -1027,9 +1246,11 @@ function selectSession(taskId, sessionId = null) {
   detachTui();
   state.sessionTask = taskId || null;
   state.sessionSessionId = nextSessionId;
+  if (taskId && nextSessionId) rememberLastOpenedSession(taskId, nextSessionId);
   rememberCurrentSessionMessage();
   renderSessionTree();
   saveLayoutState();
+  if (record) recordWorkspaceView();
   if (taskId) return openNativeTui();
   return Promise.resolve();
 }
@@ -1264,6 +1485,59 @@ function openTaskForm(task = null, options = {}) {
     } catch (error) { button.disabled = false; button.textContent = task ? '保存' : '创建'; toast(error.message, 'error'); }
   };
 }
+async function restoreTask(task) {
+  const result = await api(`/tasks/${task.id}/restore`, { method: 'POST' });
+  // 保留当前回收站视图；刷新后恢复的卡片会从回收站列表中消失。
+  // 恢复只改变任务状态；保持任务在会话列表中的原有展示状态。
+  await refresh();
+  saveLayoutState();
+  return currentTask(task.id) || result.task;
+}
+async function openTaskSession(task) {
+  showSessionTask(task.id);
+  const sessions = availableSessions(task);
+  const session = sessions.find((item) => item.id === task.activeSessionId) || sessions[0];
+  if (session) await selectSession(task.id, session.id);
+  else await openExecute(task);
+}
+function runningSessionCount(task) {
+  return availableSessions(task).filter((session) => session.running).length || (task.piRunning ? 1 : 0);
+}
+async function completeTask(task) {
+  await api(`/tasks/${task.id}/complete`, { method: 'POST' });
+  state.hiddenCompletedSessionTasks.add(task.id);
+  if (state.sessionTask === task.id) {
+    leaveCurrentSession();
+    detachTui();
+    state.sessionTask = null;
+    state.sessionSessionId = null;
+  }
+}
+async function finishCompleteTask(task) {
+  await completeTask(task);
+  await refresh();
+  saveLayoutState();
+  toast('任务已完成');
+}
+function openCompleteTaskModal(task) {
+  const runningCount = runningSessionCount(task);
+  const form = modal(`<h2>完成正在运行的任务？</h2><p>任务「${esc(task.title)}」当前有 ${runningCount} 个会话正在运行。标记完成将停止运行中的会话，是否继续？</p><div class="modal-actions"><button type="button" class="danger" id="confirm-complete-task">停止并标记完成</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-complete-task', form).onclick = async () => {
+    const button = $('#confirm-complete-task', form);
+    button.disabled = true;
+    try {
+      await completeTask(task);
+      closeModal();
+      await refresh();
+      saveLayoutState();
+      toast('任务已完成');
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  };
+}
 async function openExecute(task) {
   if (!task.workingDir) return openTaskForm(task);
   try {
@@ -1274,12 +1548,25 @@ async function openExecute(task) {
   } catch (error) { toast(error.message, 'error'); }
 }
 function openDeleteTaskModal(task) {
-  const form = modal(`<h2>废弃任务</h2><p>确定将「${esc(task.title)}」移入废弃任务吗？之后可在回收站中恢复或永久删除。</p><div class="modal-actions"><button class="danger" id="confirm-archive-task">移入废弃</button><button data-close>取消</button></div>`);
+  const runningCount = runningSessionCount(task);
+  const runningWarning = runningCount ? `<p class="danger">当前有 ${runningCount} 个会话正在运行，移入回收站后将关闭这些会话。</p>` : '';
+  const confirmLabel = runningCount ? '关闭会话并移入废弃' : '移入废弃';
+  const form = modal(`<h2>废弃任务</h2><p>确定将「${esc(task.title)}」移入废弃任务吗？之后可在回收站中恢复或永久删除。</p>${runningWarning}<div class="modal-actions"><button class="danger" id="confirm-archive-task">${confirmLabel}</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   $('#confirm-archive-task', form).onclick = async () => {
     try {
       await api(`/tasks/${task.id}`, { method: 'DELETE' });
-      closeModal(); state.status = ''; applyViewSettings(); await refresh();
+      state.sessionTaskIds.delete(task.id);
+      state.hiddenCompletedSessionTasks.add(task.id);
+      if (state.sessionTask === task.id) {
+        leaveCurrentSession();
+        detachTui();
+        state.sessionTask = null;
+        state.sessionSessionId = null;
+      }
+      // 废弃卡片后保留当前任务分类筛选，刷新后卡片自然从列表中移除。
+      closeModal(); await refresh();
+      saveLayoutState();
       toast('任务已移入废弃，可在回收站中恢复');
     } catch (error) { toast(error.message, 'error'); }
   };
@@ -1409,28 +1696,53 @@ function markSessionRead(taskId, sessionId, { keepalive = false } = {}) {
   });
 }
 function syncModuleTabs() {
+  syncArchiveButton();
   const session = state.module === 'session';
   const tasks = $('#module-tasks');
   const notes = $('#module-notes');
+  const sessionTab = $('#module-sessions');
+  const workspaceTasks = $('#workspace-module-tasks');
+  const workspaceNotes = $('#workspace-module-notes');
+  const workspaceSession = $('#workspace-module-session');
   const taskCount = state.tasks.filter((task) => task.status !== 'archived').length;
   const noteCount = state.notes.filter((note) => note.status !== 'archived').length;
+  const runningSessionCount = state.tasks
+    .filter((task) => task.status !== 'archived')
+    .reduce((count, task) => count + availableSessions(task).filter((item) => item.running).length, 0);
   tasks.querySelector('span:nth-of-type(2)').textContent = '任务';
   notes.querySelector('span:nth-of-type(2)').textContent = '便签';
+  sessionTab.querySelector('span:nth-of-type(2)').textContent = '会话';
   tasks.querySelector('.module-count').textContent = number(taskCount);
   notes.querySelector('.module-count').textContent = number(noteCount);
+  sessionTab.querySelector('.module-count').textContent = number(runningSessionCount);
   tasks.setAttribute('aria-label', `任务，${number(taskCount)}个`);
   notes.setAttribute('aria-label', `便签，${number(noteCount)}个`);
+  sessionTab.setAttribute('aria-label', `会话，当前运行${number(runningSessionCount)}个`);
   tasks.tabIndex = 0;
   notes.tabIndex = 0;
+  sessionTab.tabIndex = 0;
   const taskActive = !session && state.status !== 'archived' && state.boardType === 'tasks';
   const noteActive = !session && state.status !== 'archived' && state.boardType === 'notes';
+  const sessionActive = session;
   tasks.classList.toggle('active', taskActive);
   notes.classList.toggle('active', noteActive);
+  sessionTab.classList.toggle('active', sessionActive);
   tasks.setAttribute('aria-selected', String(taskActive));
   notes.setAttribute('aria-selected', String(noteActive));
+  sessionTab.setAttribute('aria-selected', String(sessionActive));
+  workspaceTasks?.classList.toggle('active', taskActive);
+  workspaceNotes?.classList.toggle('active', noteActive);
+  workspaceSession?.classList.toggle('active', session);
+  workspaceTasks?.setAttribute('aria-pressed', String(taskActive));
+  workspaceNotes?.setAttribute('aria-pressed', String(noteActive));
+  workspaceSession?.setAttribute('aria-pressed', String(session));
 }
 function switchModule(module) {
   const session = module === 'session';
+  if (session && state.status === 'archived') {
+    state.status = '';
+    applyViewSettings();
+  }
   if (!session && state.sessionTask) leaveCurrentSession();
   state.module = session ? 'session' : 'tasks';
   saveLayoutState();
@@ -1445,7 +1757,11 @@ function switchModule(module) {
     requestAnimationFrame(() => {
       if (state.module === 'session') ensureTerminalInputFocus();
     });
-  } else renderList();
+  } else {
+    // 离开会话页后保留会话上下文，但不让侧栏继续显示选中态。
+    renderSessionTree();
+    renderList();
+  }
 }
 
 function closeThemeMenu() {
@@ -1453,6 +1769,20 @@ function closeThemeMenu() {
   if (!menu || menu.classList.contains('hidden')) return;
   menu.classList.add('hidden');
   $('#style-toggle').setAttribute('aria-expanded', 'false');
+}
+function openTopbarNotePanel(note) {
+  const panel = $('#topbar-note-panel');
+  if (!panel) return;
+  const title = note.title?.trim();
+  panel.innerHTML = `${title ? `<div class="session-detail-row"><span>标题</span><p>${esc(title)}</p></div>` : ''}<div class="session-detail-row"><span>便签内容</span><p>${esc(note.description)}</p></div>`;
+  panel.dataset.noteId = note.id;
+  panel.classList.remove('hidden');
+}
+function closeTopbarNotePanel() {
+  const panel = $('#topbar-note-panel');
+  if (!panel) return;
+  delete panel.dataset.noteId;
+  panel.classList.add('hidden');
 }
 function toggleThemeMenu(focusSelector) {
   const menu = $('#theme-menu');
@@ -1480,10 +1810,17 @@ document.addEventListener('click', (event) => {
   if (!event.target.closest('#style-toggle, #mode-toggle, #theme-menu')) closeThemeMenu();
   if (!event.target.closest('#topbar-note-buttons')) closeTopbarNotePanel();
   if (!event.target.closest('#session-note-buttons, .session-note-menu')) closeSessionNoteMenu();
-  if (sessionTaskDetailsOpen && !event.target.closest('#session-context-copy')) closeSessionTaskDetails();
+  if (!event.target.closest('#session-context-copy')) {
+    closeSessionActionMenu();
+    if (sessionTaskDetailsOpen) closeSessionTaskDetails();
+  }
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { closeThemeMenu(); closeTopbarNotePanel(); closeSessionNoteMenu(); }
+  if (event.key === 'Escape') {
+    closeThemeMenu(); closeTopbarNotePanel(); closeSessionNoteMenu();
+    closeSessionActionMenu();
+    if (sessionTaskDetailsOpen) closeSessionTaskDetails();
+  }
 });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (localStorage.getItem('workbench-theme') === 'system') { applyTheme('system'); void restartTuiForTheme(); } });
 function openNewBoardItem(type) {
@@ -1491,6 +1828,7 @@ function openNewBoardItem(type) {
     state.status = '';
     state.boardType = type;
     applyViewSettings(); renderList(); saveLayoutState();
+    recordWorkspaceView();
   }
   if (type === 'notes') openNoteForm();
   else openTaskForm();
@@ -1501,9 +1839,20 @@ function openBoardType(type) {
   applyViewSettings();
   switchModule('tasks');
   saveLayoutState();
+  recordWorkspaceView();
+}
+function openLastSession() {
+  const last = findLastOpenedSession();
+  if (!last) return toast('暂无可打开的历史会话', 'error');
+  showSessionTask(last.taskId);
+  void selectSession(last.taskId, last.sessionId);
 }
 $('#module-tasks').onclick = () => openBoardType('tasks');
 $('#module-notes').onclick = () => openBoardType('notes');
+$('#module-sessions').onclick = openLastSession;
+$('#workspace-module-tasks').onclick = () => openBoardType('tasks');
+$('#workspace-module-notes').onclick = () => openBoardType('notes');
+$('#workspace-module-session').onclick = openLastSession;
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
   state.sidebarCollapsed = collapsed;
@@ -1513,11 +1862,14 @@ $('#sidebar-toggle').onclick = () => {
   localStorage.setItem('workbench-sidebar-collapsed', String(collapsed));
   saveLayoutState();
 };
-[$('#module-tasks'), $('#module-notes')].forEach((tab, index, tabs) => {
+[$('#module-tasks'), $('#module-notes'), $('#module-sessions')].forEach((tab, index, tabs) => {
   tab.onkeydown = (event) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    let nextIndex = index;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = tabs.length - 1;
+    else nextIndex = (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     tabs[nextIndex].focus();
     tabs[nextIndex].click();
   };
@@ -1529,17 +1881,19 @@ $('#archive-toggle').onclick = () => {
   switchModule('tasks');
   renderList();
   saveLayoutState();
+  recordWorkspaceView();
 };
-// 任务入口直接创建任务，并立即生成首个子会话。
-$('#sidebar-new-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
+// 任务入口只创建任务，不预建会话。
+$('#sidebar-new-task').onclick = () => openTaskForm();
 $('#sidebar-new-note').onclick = () => openNewBoardItem('notes');
+$('#sidebar-new-session-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
 // 会话页的空白区域不应把焦点从终端输入框移走；真正的交互控件仍保留自己的焦点行为。
 function keepTerminalFocusOnBlankArea(event) {
   if (state.module !== 'session' || !terminal || $('.modal')) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
-  if (target.closest('button, a, input, select, textarea, [contenteditable="true"], [tabindex]:not([tabindex="-1"]), [role="button"], [role="tab"], [role="menuitem"], .xterm')) return;
+  if (target.closest('button, a, input, select, textarea, [contenteditable="true"], [tabindex]:not([tabindex="-1"]), [role="button"], [role="tab"], [role="menuitem"], .session-description-panel, .session-note-menu, .xterm')) return;
   // 阻止浏览器在空白控制带上产生临时焦点，再把焦点交还给终端。
   if (event.type === 'pointerdown') event.preventDefault();
   ensureTerminalInputFocus();
@@ -1558,30 +1912,38 @@ function restoreTerminalFocusAfterSidebarInteraction(event) {
 }
 document.addEventListener('pointerup', restoreTerminalFocusAfterSidebarInteraction);
 document.addEventListener('click', restoreTerminalFocusAfterSidebarInteraction);
-$('#session-title').onclick = (event) => {
-  if (!currentTask(state.sessionTask)) return;
-  const closing = sessionTaskDetailsOpen;
-  sessionTaskDetailsOpen = !sessionTaskDetailsOpen;
+$('#copy-session-file').onclick = (event) => {
+  event.stopPropagation();
+  const task = currentTask(state.sessionTask);
+  if (!task) return;
+  sessionActionMenuOpen = !sessionActionMenuOpen;
+  if (sessionActionMenuOpen) sessionTaskDetailsOpen = false;
   renderSessionHeader();
-  if (closing) {
-    event.currentTarget.blur();
-    ensureTerminalInputFocus();
+};
+$('#session-action-menu').onclick = async (event) => {
+  const action = event.target.closest('[data-session-action]');
+  if (!action || action.disabled) return;
+  const task = currentTask(state.sessionTask);
+  const session = availableSessions(task).find((item) => item.id === state.sessionSessionId);
+  const commandPath = session?.sessionFile;
+  const description = task?.description?.trim();
+  closeSessionActionMenu();
+  if (action.dataset.sessionAction === 'details') {
+    sessionTaskDetailsOpen = true;
+    renderSessionHeader();
+    return;
+  }
+  const text = action.dataset.sessionAction === 'copy-command'
+    ? (commandPath ? `pi --session "${commandPath}"` : '')
+    : (description || '');
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(action.dataset.sessionAction === 'copy-command' ? 'pi 会话命令已复制' : '任务描述已复制');
+  } catch {
+    toast('复制失败，请手动选择内容', 'error');
   }
 };
-function openTopbarNotePanel(note) {
-  const panel = $('#topbar-note-panel');
-  if (!panel) return;
-  const title = note.title?.trim();
-  panel.innerHTML = `${title ? `<div class="session-detail-row"><span>标题</span><p>${esc(title)}</p></div>` : ''}<div class="session-detail-row"><span>便签内容</span><p>${esc(note.description)}</p></div>`;
-  panel.dataset.noteId = note.id;
-  panel.classList.remove('hidden');
-}
-function closeTopbarNotePanel() {
-  const panel = $('#topbar-note-panel');
-  if (!panel) return;
-  delete panel.dataset.noteId;
-  panel.classList.add('hidden');
-}
 let sessionNoteMenuAnchor = null;
 function closeSessionNoteMenu() {
   sessionNoteMenuAnchor?.setAttribute('aria-expanded', 'false');
@@ -1682,8 +2044,8 @@ function bindNoteDrag(root) {
   });
   root.addEventListener('contextmenu', (event) => { if (noteDrag?.active) event.preventDefault(); });
 }
-bindNoteDrag($('#topbar-note-buttons'));
 bindNoteDrag($('#session-note-buttons'));
+bindNoteDrag($('#topbar-note-buttons'));
 // 指针移出按钮容器后，pointerup 可能不再经过容器；全局兜底，确保拖动态总能清理。
 window.addEventListener('pointerup', (event) => {
   if (noteDrag?.pointerId === event.pointerId) finishNoteDrag(true);
@@ -1703,7 +2065,6 @@ $('#topbar-note-buttons').onclick = (event) => {
   if (panel && !panel.classList.contains('hidden') && panel.dataset.noteId === note.id) {
     closeTopbarNotePanel();
     button.blur();
-    ensureTerminalInputFocus();
     return;
   }
   openTopbarNotePanel(note);
@@ -1722,16 +2083,6 @@ $('#session-note-buttons').onclick = (event) => {
     return;
   }
   openSessionNoteMenu(button, note);
-};
-$('#copy-session-file').onclick = async () => {
-  const task = currentTask(state.sessionTask);
-  const session = availableSessions(task).find((item) => item.id === state.sessionSessionId);
-  const path = session?.sessionFile;
-  if (!path) return;
-  try {
-    await navigator.clipboard.writeText(`pi --session "${path}"`);
-    toast('pi 会话命令已复制');
-  } catch { toast('复制失败，请手动选择命令', 'error'); }
 };
 async function reconnectTreeSession(taskId, sessionId) {
   // 仅当前正在查看的子会话支持双击重新连接；其他项仍按普通打开处理。
@@ -1791,6 +2142,7 @@ $('#board-filter-tabs').onclick = (event) => {
     state.status = value;
   }
   applyViewSettings(); renderTaskSidebar(); renderList(); saveLayoutState();
+  recordWorkspaceView();
 };
 $('#sort-toggle').onclick = () => {
   const index = SORT_OPTIONS.findIndex((option) => option.value === state.sort);
@@ -1827,9 +2179,11 @@ $('#task-list').onclick = async (event) => {
     return;
   }
   if (button.dataset.action === 'clear-note-filters') {
-    state.search = ''; $('#search').value = ''; renderList(); saveLayoutState(); return;
+    state.search = ''; $('#search').value = ''; renderList(); saveLayoutState(); recordWorkspaceView(); return;
   }
-  if (state.boardType === 'notes' || ['edit-note', 'delete-note', 'restore-note', 'purge-note', 'toggle-top-note', 'toggle-session-note'].includes(button.dataset.action)) {
+  const noteActions = ['edit-note', 'delete-note', 'restore-note', 'purge-note', 'toggle-top-note', 'toggle-session-note'];
+  // 回收站的“全部”视图可能在便签页状态下同时渲染任务和便签，不能仅凭 boardType 分流。
+  if (button.closest('.note-card') || noteActions.includes(button.dataset.action)) {
     const note = currentNote(button.dataset.id);
     if (!note) return;
     try {
@@ -1852,6 +2206,7 @@ $('#task-list').onclick = async (event) => {
       applyViewSettings();
       $('#search').value = '';
       renderTaskSidebar(); renderList(); saveLayoutState();
+      recordWorkspaceView();
       $('#search').focus();
     } else if (button.dataset.action === 'execute') {
       button.disabled = true;
@@ -1873,28 +2228,20 @@ $('#task-list').onclick = async (event) => {
     }
     else if (button.dataset.action === 'edit') openTaskForm(task);
     else if (button.dataset.action === 'delete') openDeleteTaskModal(task);
+    else if (button.dataset.action === 'open-archived-session') {
+      await openTaskSession(task);
+      toast('已进入子会话，任务仍为废弃状态');
+    }
     else if (button.dataset.action === 'restore') {
-      const result = await api(`/tasks/${task.id}/restore`, { method: 'POST' });
-      state.status = '';
-      applyViewSettings();
-      await refresh();
-      const restoredLabel = STATUS[result.task?.status]?.label || '已恢复';
+      const restoredTask = await restoreTask(task);
+      const restoredLabel = STATUS[restoredTask?.status]?.label || '已恢复';
       toast(`任务已恢复到${restoredLabel}`);
     }
     else if (button.dataset.action === 'purge') openPurgeTaskModal(task);
     else if (button.dataset.action === 'purge-archived') openClearArchivedModal();
     else if (button.dataset.action === 'complete') {
-      await api(`/tasks/${task.id}/complete`, { method: 'POST' });
-      state.hiddenCompletedSessionTasks.add(task.id);
-      if (state.sessionTask === task.id) {
-        leaveCurrentSession();
-        detachTui();
-        state.sessionTask = null;
-        state.sessionSessionId = null;
-      }
-      await refresh();
-      saveLayoutState();
-      toast('任务已完成');
+      if (runningSessionCount(task)) openCompleteTaskModal(task);
+      else await finishCompleteTask(task);
     }
     else if (button.dataset.action === 'reopen') { await api(`/tasks/${task.id}/reopen`, { method: 'POST' }); toast('任务已重开'); refresh(); }
     else if (button.dataset.action === 'terminate' && confirm('确定终止当前 pi TUI 吗？')) { await api(`/tasks/${task.id}/terminate`, { method: 'POST' }); toast('执行已终止'); refresh(); }
@@ -1916,7 +2263,7 @@ taskEvents.onmessage = ({ data }) => {
 };
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { stopMarqueeMotion(); return; }
-  if (!marqueeNotice) renderMarquee();
+  renderMarquee();
   if (state.module === 'session') void refresh();
 });
 window.addEventListener('pagehide', () => {
