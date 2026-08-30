@@ -511,9 +511,7 @@ h1, h2, h3 { text-wrap: balance; }
   pointer-events: none;
 }
 .toolbar .search-field input { width: 100%; min-width: 0; padding-left: 29px; }
-#task-list { max-width: 1240px; margin: 0 auto; padding: 0 28px 54px; }
-.board-mode #task-list { max-width: none; padding: 0 28px 54px; }
-.task-board { column-count: 1; column-width: auto; column-gap: 16px; }
+.task-board { min-width: 0; }
 .task-board-column {
   content-visibility: auto;
   contain-intrinsic-size: 240px;
@@ -583,12 +581,10 @@ h1, h2, h3 { text-wrap: balance; }
 }
 .card:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: 0 10px 24px rgba(25, 51, 61, .1); }
 .card.archived { border-left: 1px dashed var(--line); opacity: .8; }
-.task-board .card { margin: 0 0 11px; padding: 0 13px 13px; }
 .card-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 -18px; padding: 12px 18px 5px; border-radius: 7px 7px 0 0; }
 .card-heading { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
 .card-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-heading .task-folder { max-width: 100%; }
-.task-board .card-head { margin: 0 -13px; padding: 10px 13px 5px; }
 .card-title { min-width: 0; flex: 1; margin: 0; overflow: hidden; font-size: 16px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
 .card-status-icon { display: inline-grid; place-items: center; width: 1.15em; height: 1.15em; margin-right: .35em; color: var(--muted); font: 700 .95em/1 "SFMono-Regular", Consolas, monospace; vertical-align: -.08em; }
 .card-status-icon.unfinished { color: var(--status-todo); }
@@ -600,7 +596,6 @@ h1, h2, h3 { text-wrap: balance; }
 .deadline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .deadline.overdue { color: #c4472d; font-weight: 750; }
 .card-desc { margin: 5px 0 13px; color: var(--muted); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.task-board .card-desc { margin: 5px 0 9px; -webkit-line-clamp: 2; }
 .archive-info { margin-top: 10px; color: var(--muted); font-size: 11px; }
 .archive-actions { display: flex; justify-content: flex-end; margin: 4px 0 12px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
@@ -615,8 +610,6 @@ h1, h2, h3 { text-wrap: balance; }
 .task-board .card-actions { gap: 5px; margin-top: 10px; }
 .task-board .card-actions button { height: 30px; padding: 5px 8px; font-size: 12px; }
 .task-board .card-actions .icon-button { width: 30px; min-width: 30px; padding: 5px; }
-.task-board.compact-card-layout .task-board-list { column-count: 1; column-width: auto; column-gap: 11px; }
-.task-board.compact-card-layout .task-board-list .card { break-inside: avoid; margin: 0 0 11px; }
 .card.color-red, .session-task-heading.color-red { background: var(--wash-red); }
 .card.color-orange, .session-task-heading.color-orange { background: var(--wash-orange); }
 .card.color-yellow, .session-task-heading.color-yellow { background: var(--wash-yellow); }
@@ -820,7 +813,7 @@ body.session-mode .sidebar-panel { padding-top: 6px; }
 .session-main { display: flex; flex-direction: column; }
 body.session-mode .session-main { padding-bottom: 42px; }
 body:not(.session-mode) #workspace-main { padding-bottom: 42px; }
-.session-header { height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.session-header { height: var(--topbar-height); flex: 0 0 var(--topbar-height); display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 7px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .session-context { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .session-context-icon { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 7px 7px 7px 2px; background: var(--accent-strong); color: #fffaf4; font: 18px Georgia, serif; }
 button.session-context-icon { border: 0; padding: 0; }
@@ -1000,42 +993,13 @@ body {
   z-index: 5;
   overflow: visible;
 }
-#task-toolbar {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "filters controls";
-  align-items: center;
-  column-gap: 12px;
-  row-gap: 8px;
-  flex: 0 0 auto;
-  z-index: 3;
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(12px);
-}
-#task-toolbar .board-filter-tabs { grid-area: filters; margin-bottom: 0; }
-#task-toolbar .toolbar-controls { grid-area: controls; width: auto; min-width: 0; }
-#task-toolbar .toolbar-tools { width: auto; }
-@media (max-width: 900px) {
-  #task-toolbar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "filters" "controls"; }
-  #task-toolbar .toolbar-controls { width: 100%; }
-  #task-toolbar .toolbar-tools { width: 100%; }
-}
 #task-list {
   flex: 1 1 auto;
-  width: 100%;
-  max-width: none;
   min-height: 0;
   margin: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-#task-toolbar .toolbar-controls {
-  width: 100%;
 }
 .sidebar-header,
 .sidebar-nav {
@@ -1148,61 +1112,10 @@ body.theme-classic .terminal-empty, body.theme-geek .terminal-empty, body.theme-
   body.theme-classic .toolbar, body.theme-geek .toolbar, body.theme-aurora .toolbar, body.theme-newspaper .toolbar { padding-left: 14px; padding-right: 14px; }
 }
 
-/* 看板和卡片使用瀑布流，避免不同高度的分组/卡片被强制对齐。 */
-/* 三列横向区域都以侧栏宽度为同一基准：顶部不再额外留边或插入间隙。 */
-.topbar { padding-left: 0; padding-right: 0; gap: 0; }
-.topbar-brand { margin-left: 0; padding: 0 5px 0 8px; justify-content: space-between; }
-/* 网页顶部仅保留左侧工作区控制，隐藏本机状态及任务统计控件。 */
-.topbar-tools { display: none; }
-.brand-copy strong { font-size: 14px; }
-.topbar-brand .brand-copy { display: none; }
-/* 顶栏右侧承载当前工作区标题；任务和便签不再把标题单独放在控制带中。 */
-.topbar > .workspace-page-header {
-  display: flex;
-  align-items: center;
-  flex: 1 1 auto;
-  min-width: 0;
-  height: var(--topbar-height);
-  overflow: hidden;
-}
-.workspace-page-header .toolbar-intro {
-  align-items: center;
-  min-width: 0;
-  margin: 0;
-  padding: 0 16px 0 5px;
-  gap: 10px;
-  white-space: nowrap;
-}
-.workspace-page-header .toolbar-intro h1 {
-  min-width: 0;
-  overflow: hidden;
-  margin: 0;
-  font-size: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workspace-page-header .section-kicker { flex: 0 0 auto; font-size: 9px; }
-body.session-mode .topbar > .workspace-page-header { display: none; }
-#task-toolbar {
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "filters controls";
-  column-gap: 14px;
-  row-gap: 0;
-  padding: 10px 20px;
-}
-#task-toolbar .board-filter-tabs { min-width: 0; max-width: 100%; overflow-x: auto; }
-#task-toolbar .toolbar-controls { width: auto; min-width: 0; padding: 4px; }
-#task-toolbar .toolbar-tools { min-width: 0; gap: 4px; }
-#task-toolbar .toolbar-tools .search-field { min-width: 150px; width: min(240px, 24vw); flex-basis: 240px; }
-#task-toolbar .layout-toggle { width: 32px; min-width: 32px; height: 32px; }
-#task-toolbar .search-field input { height: 32px; }
-.session-header { height: var(--topbar-height); flex-basis: var(--topbar-height); padding: 0 7px; gap: 10px; }
+/* 基础滚动约束；具体尺寸和网格排布统一收口在文件末尾的工作台布局段。 */
 /* 无论侧边栏是否收起，顶部左侧控制区与右侧标题区都保持分割线。 */
 .topbar-brand { align-self: stretch; border-right: 1px solid var(--line); }
 .topbar-brand:hover { border-right-color: var(--line); border-bottom-color: var(--line); }
-.topbar > .session-header { display: none; flex: 1 1 auto; min-width: 0; height: var(--topbar-height); flex-basis: var(--topbar-height); border: 0; background: transparent; }
-body.session-mode .topbar { gap: 0; padding-right: 0; }
-body.session-mode .topbar > .session-header { display: flex; height: var(--topbar-height); flex-basis: var(--topbar-height); }
 /* 会话顶部栏沿用任务、便签和回收站的标题排版，同时保留标题右侧的操作按钮。 */
 body.session-mode .topbar > .session-header .session-context { flex: 1 1 auto; min-width: 0; }
 body.session-mode .topbar > .session-header .session-context-copy { width: 100%; }
@@ -1216,9 +1129,6 @@ body.session-mode .topbar > .session-header .session-context-copy { width: 100%;
 .session-toolbar-intro .session-title-row > .session-title-text-viewport { margin-left: 0; padding-left: 0; }
 .session-toolbar-intro .session-title-button:hover:not(:disabled) { color: var(--ink); }
 .session-file-row { margin-top: 2px; }
-.sidebar-nav { padding-top: 6px; padding-bottom: 6px; }
-.sidebar-panel { padding-top: 6px; padding-bottom: 6px; }
-.task-groups { margin-top: 7px; padding-top: 6px; }
 /* 所有主题共用同一组图标盒尺寸，任务、便签、任务标题和子会话保持一致。 */
 .sidebar-nav-item span:first-child,
 .session-task-title > span:first-child,
@@ -1236,20 +1146,8 @@ body.session-mode .topbar > .session-header .session-context-copy { width: 100%;
 }
 #session-tree,
 body[class*="theme-"] #session-tree { margin-top: 0; padding-top: 0; border-top: 0; }
-@media (max-width: 1080px) {
-  #task-toolbar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "filters controls"; row-gap: 8px; }
-  #task-toolbar .toolbar-controls { width: auto; }
-}
 @media (max-width: 760px) {
   #app-sidebar { flex-basis: var(--sidebar-width); }
-  #task-toolbar { grid-template-columns: 1fr; grid-template-areas: "filters" "controls"; row-gap: 7px; padding-top: 8px; padding-bottom: 8px; }
-  #task-toolbar .toolbar-controls, #task-toolbar .toolbar-tools { width: 100%; }
-  #task-toolbar .toolbar-tools .search-field { width: auto; flex: 1 1 150px; }
-  #task-list, .board-mode #task-list { padding-top: 10px; padding-left: 14px; padding-right: 14px; }
-  .task-board { grid-template-columns: 1fr; gap: 8px; }
-  .task-board-list { grid-template-columns: 1fr; }
-  .task-board .card-actions .icon-button { width: 38px; min-width: 38px; height: 38px; }
-  .session-header { height: var(--topbar-height); flex-basis: var(--topbar-height); }
   .session-file-copy { width: 25px; min-width: 25px; height: 25px; min-height: 25px; flex-basis: 25px; }
   .workspace-page-header .toolbar-intro { padding-left: 12px; padding-right: 12px; }
   .workspace-page-header .section-kicker,
@@ -2253,10 +2151,18 @@ body.theme-newspaper:not(.sidebar-collapsed) #workbench-layout::before {
   border-bottom: 0;
 }
 #workbench-layout > .topbar > .workspace-page-header {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
   height: auto;
   min-height: var(--topbar-height);
   overflow: visible;
 }
+#workbench-layout > .topbar > .session-header { display: none; }
+body.session-mode #workbench-layout > .topbar > .workspace-page-header { display: none; }
+body.session-mode #workbench-layout > .topbar > .session-header { display: flex; }
+#workbench-layout > .topbar > .topbar-tools { display: none; }
 #workbench-layout > .topbar > .workspace-page-header,
 #workbench-layout > .topbar > .session-header {
   border-bottom: 0;
@@ -2567,7 +2473,7 @@ body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) .card.cust
 .task-board .card-head { margin: 0 -11px; padding: 9px 11px 5px; }
 .task-board .card-title { font-size: 15px; line-height: 1.35; }
 .task-board .task-folder { max-width: 100%; font-size: 10px; }
-.task-board .card-desc { min-height: 0; margin: 4px 0 8px; line-height: 1.45; }
+.task-board .card-desc { min-height: 0; margin: 4px 0 8px; line-height: 1.45; -webkit-line-clamp: 2; }
 .task-board .card-actions { gap: 5px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .task-board .card-actions button { height: 30px; }
 .task-board .card-actions .primary { min-width: 32px; }
