@@ -63,6 +63,7 @@ subscribeTasks(({ taskId }) => notifyTaskChanged(taskId));
 app.use(express.json({ limit: '2mb' }));
 app.use('/vendor/xterm', express.static(path.join(ROOT, 'node_modules', '@xterm', 'xterm')));
 app.use('/vendor/xterm-fit', express.static(path.join(ROOT, 'node_modules', '@xterm', 'addon-fit', 'lib')));
+app.use('/vendor/xterm-search', express.static(path.join(ROOT, 'node_modules', '@xterm', 'addon-search', 'lib')));
 app.use(express.static(path.join(ROOT, 'public')));
 
 app.post('/api/client-log', (req, res) => {

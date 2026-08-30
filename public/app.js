@@ -44,6 +44,7 @@ let layoutInitialized = false;
 let tuiSocket = null;
 let terminal = null;
 let fitAddon = null;
+let terminalSearchAddon = null;
 let terminalResizeObserver = null;
 let terminalImeCursorHandler = null;
 let terminalCursorSubscription = null;
@@ -59,7 +60,7 @@ let modalRestoreFocus = null;
 let sessionTaskDetailsOpen = false;
 let sessionActionMenuOpen = false;
 let marqueeMotionFrame = null;
-let marqueeCurrentContent = null;
+let marqueeMotion = null;
 let renderedPinnedNotesSignature = '';
 let renderedSessionTreeSignature = '';
 let sessionTreeClickTimer = null;
@@ -246,17 +247,6 @@ const BOARD_GROUP_ICONS = {
 function syncTaskToolbarTitle() {
   const archived = state.status === 'archived';
   const notes = !archived && state.boardType === 'notes';
-  let title = '任务';
-  let kicker = 'WORKSPACE / TASKS';
-  if (archived) {
-    title = '回收站';
-    kicker = 'WORKSPACE / ARCHIVE';
-  } else if (notes) {
-    title = '便签';
-    kicker = 'WORKSPACE / NOTES';
-  }
-  $('#task-view-title').textContent = title;
-  $('#workspace-page-kicker').textContent = kicker;
   const clearArchivedButton = $('#purge-archived');
   if (clearArchivedButton) {
     const archivedTaskCount = state.tasks.filter((task) => task.status === 'archived').length;
@@ -264,6 +254,18 @@ function syncTaskToolbarTitle() {
     const archivedCounts = { all: archivedTaskCount + archivedNoteCount, tasks: archivedTaskCount, notes: archivedNoteCount };
     clearArchivedButton.classList.toggle('hidden', !archived);
     clearArchivedButton.disabled = archivedCounts[state.archiveType] === 0;
+  }
+  const searchInput = $('#search');
+  let searchLabel = '搜索任务';
+  if (archived) searchLabel = '搜索回收站';
+  else if (notes) searchLabel = '搜索便签';
+  if (searchInput) searchInput.setAttribute('aria-label', searchLabel);
+  const newItemButton = $('#toolbar-new-item');
+  if (newItemButton) {
+    const label = notes ? '新建便签' : '新建任务';
+    newItemButton.classList.toggle('hidden', archived);
+    newItemButton.title = label;
+    newItemButton.setAttribute('aria-label', label);
   }
   syncArchiveButton();
   syncModuleTabs();
@@ -361,48 +363,67 @@ function noteLabel(note) { return note?.title ? `${note.title}：${note.descript
 function orderedPinnedNotes(flag, orderKey) {
   return state.notes.filter((note) => note.status !== 'archived' && note[flag]).sort((a, b) => Number(a[orderKey]) - Number(b[orderKey]) || new Date(a.createdAt) - new Date(b.createdAt));
 }
+const MARQUEE_INITIAL_ITEMS = 8;
+const MARQUEE_MAX_ITEMS = 24;
+const MARQUEE_GAP = 28;
 function stopMarqueeMotion() {
   if (marqueeMotionFrame !== null) cancelAnimationFrame(marqueeMotionFrame);
   marqueeMotionFrame = null;
+  marqueeMotion = null;
 }
-function startMarqueeMotion(root, track) {
+function marqueeMessages() {
+  return state.notes.filter((note) => note.status !== 'archived').map((note) => {
+    const chars = [...noteLabel(note)];
+    return chars.length > MARQUEE_MAX_MESSAGE_CHARS ? `${chars.slice(0, MARQUEE_MAX_MESSAGE_CHARS).join('')}…` : chars.join('');
+  }).filter(Boolean);
+}
+function shuffledMarqueeMessages(messages) {
+  const shuffled = messages.slice();
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swap]] = [shuffled[swap], shuffled[index]];
+  }
+  return shuffled;
+}
+function nextMarqueeMessage(motion) {
+  if (motion.roundIndex >= motion.round.length) {
+    motion.round = shuffledMarqueeMessages(motion.messages);
+    motion.roundIndex = 0;
+  }
+  return motion.round[motion.roundIndex++];
+}
+function marqueeItemMarkup(message) {
+  return `<span class="note-marquee-item" title="${esc(message)}">${esc(message)}</span>`;
+}
+function appendMarqueeItem(motion) {
+  const message = nextMarqueeMessage(motion);
+  motion.track.insertAdjacentHTML('beforeend', marqueeItemMarkup(message));
+}
+function startMarqueeMotion(motion) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const segment = track.querySelector('.note-marquee-sequence');
-  const width = segment?.getBoundingClientRect().width || 0;
-  if (!width) return;
-  // 从通知消息框右侧外开始进入，而不是与上一批首尾相接。
-  let offset = -root.clientWidth;
-  // 先同步放到右侧，再等待下一帧；避免新 DOM 在左侧默认位置闪烁一帧。
-  track.style.transform = `translate3d(${root.clientWidth}px, 0, 0)`;
-  let lastTime = performance.now();
+  const { root, track } = motion;
+  marqueeMotion = motion;
   const tick = (now) => {
     // 悬停只改变像素速度，不重置 transform，因此不会产生回跳或卡顿。
     const speed = root.matches(':hover') ? 30 : 120;
-    offset += (now - lastTime) * speed / 1000;
-    lastTime = now;
-    // 额外走出 16px，确保最后一个字符完全离开消息框后才切换下一条。
-    if (offset >= width + 16) {
-      marqueeCurrentContent = null;
-      renderMarquee();
-      return;
+    motion.travel += Math.min(Math.max(0, now - motion.lastTime), 120) * speed / 1000;
+    motion.lastTime = now;
+    const first = track.firstElementChild;
+    if (first) {
+      const width = first.getBoundingClientRect().width;
+      // 每帧最多回收一个节点，避免大步长触发无界循环。
+      if (motion.travel >= root.clientWidth + width) {
+        motion.travel -= width + MARQUEE_GAP;
+        first.remove();
+        if (track.children.length < MARQUEE_INITIAL_ITEMS) appendMarqueeItem(motion);
+      }
     }
-    track.style.transform = `translate3d(${-offset}px, 0, 0)`;
+    track.style.transform = `translate3d(${root.clientWidth - motion.travel}px, 0, 0)`;
     marqueeMotionFrame = requestAnimationFrame(tick);
   };
+  track.style.transform = `translate3d(${root.clientWidth}px, 0, 0)`;
+  motion.lastTime = performance.now();
   marqueeMotionFrame = requestAnimationFrame(tick);
-}
-function sampleMarqueeMessage() {
-  // 蓄水池抽样只保留一条未废弃便签，避免便签数量影响通知消息框的 DOM 大小。
-  let selected = null;
-  let candidateCount = 0;
-  for (const note of state.notes) {
-    if (note.status === 'archived') continue;
-    candidateCount += 1;
-    if (Math.floor(Math.random() * candidateCount) === 0) selected = note;
-  }
-  if (!selected) return null;
-  const chars = [...noteLabel(selected)];
-  return chars.length > MARQUEE_MAX_MESSAGE_CHARS ? `${chars.slice(0, MARQUEE_MAX_MESSAGE_CHARS).join('')}…` : chars.join('');
 }
 function renderMarquee() {
   stopMarqueeMotion();
@@ -410,42 +431,54 @@ function renderMarquee() {
   const shell = $('#toast-root');
   root.classList.remove('notice', 'error');
   root.setAttribute('aria-hidden', 'true');
-  const sampled = marqueeCurrentContent || sampleMarqueeMessage();
-  if (!sampled) {
-    marqueeCurrentContent = null;
+  const messages = marqueeMessages();
+  if (!messages.length) {
     root.classList.add('empty'); shell.classList.add('notification-empty');
     root.innerHTML = '';
     return;
   }
   root.classList.remove('empty'); shell.classList.remove('notification-empty');
-  if (!marqueeCurrentContent) marqueeCurrentContent = sampled;
-  root.innerHTML = `<span class="note-marquee-track" title="${esc(marqueeCurrentContent)}"><span class="note-marquee-sequence">${esc(marqueeCurrentContent)}</span></span>`;
-  const track = root.querySelector('.note-marquee-track');
+  const motion = { root, track: null, messages, round: [], roundIndex: 0, travel: 0, lastTime: 0 };
+  const initialItems = Array.from({ length: MARQUEE_INITIAL_ITEMS }, () => marqueeItemMarkup(nextMarqueeMessage(motion))).join('');
+  root.innerHTML = `<span class="note-marquee-track">${initialItems}</span>`;
+  motion.track = root.querySelector('.note-marquee-track');
+  // 有界预填充：最多补到 24 个节点，不使用可能失控的 while。
+  for (let index = MARQUEE_INITIAL_ITEMS; index < MARQUEE_MAX_ITEMS && motion.track.getBoundingClientRect().width < root.clientWidth * 2; index += 1) {
+    appendMarqueeItem(motion);
+  }
   // DOM 插入当帧即定位到右侧，不能等 rAF 回调，否则低帧率下会闪到左侧。
-  track.style.transform = `translate3d(${root.clientWidth}px, 0, 0)`;
-  requestAnimationFrame(() => startMarqueeMotion(root, track));
+  motion.track.style.transform = `translate3d(${root.clientWidth}px, 0, 0)`;
+  marqueeMotionFrame = requestAnimationFrame(() => {
+    marqueeMotionFrame = null;
+    startMarqueeMotion(motion);
+  });
 }
 function renderTopbarNoteButtons() {
   const root = $('#topbar-note-buttons');
   if (!root) return;
   const notes = orderedPinnedNotes('pinnedToTopBar', 'topbarOrder');
-  root.innerHTML = `<button type="button" class="note-button note-add-button" data-new-topbar-note aria-label="新建提醒便签" title="新建提醒便签">＋</button>${notes.map((note) => `<button type="button" class="note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-topbar-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="topbar" aria-label="${esc(noteLabel(note))}" title="${esc(noteLabel(note))}">${noteInitialMarkup(note)}</button>`).join('')}<section id="topbar-note-panel" class="session-description-panel topbar-note-panel hidden" aria-label="便签详情"></section>`;
+  root.innerHTML = `${notes.map((note) => `<button type="button" class="note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-topbar-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="topbar" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="${esc(noteLabel(note))}">${noteInitialMarkup(note)}</button>`).join('')}<button type="button" class="note-button note-add-button" data-new-topbar-note aria-label="新建提醒便签" title="新建提醒便签">＋</button><section id="topbar-note-panel" class="session-description-panel topbar-note-panel hidden" aria-label="便签详情"></section>`;
 }
 function renderPinnedNotes() {
   // 会话输出也会触发 refresh；仅在便签自身变化时重绘，不能重启动画。
   const signature = JSON.stringify(state.notes.map((note) => [note.id, note.updatedAt, note.status, note.title, note.description, note.color, note.pinnedToTopBar, note.pinnedToSessionBar, note.topbarOrder, note.sessionOrder]));
   if (signature === renderedPinnedNotesSignature) return;
   renderedPinnedNotesSignature = signature;
-  marqueeCurrentContent = null;
   renderTopbarNoteButtons();
-  renderMarquee();
+  const messages = marqueeMessages();
+  if (messages.length && marqueeMotion?.track?.isConnected) {
+    marqueeMotion.messages = messages;
+    marqueeMotion.round = [];
+    marqueeMotion.roundIndex = 0;
+  }
+  else renderMarquee();
 }
 function renderSessionNoteButtons() {
   const root = $('#session-note-buttons');
   if (!root) return;
   closeSessionNoteMenu();
   const notes = orderedPinnedNotes('pinnedToSessionBar', 'sessionOrder');
-  root.innerHTML = `<button type="button" class="note-button note-add-button" data-new-session-note aria-label="新建会话便签" title="新建会话便签">＋</button>${notes.map((note) => `<button type="button" class="note-button session-note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-session-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="session" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="选择发送方式">${noteInitialMarkup(note)}</button>`).join('')}`;
+  root.innerHTML = `${notes.map((note) => `<button type="button" class="note-button session-note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-session-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="session" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="选择发送方式">${noteInitialMarkup(note)}</button>`).join('')}<button type="button" class="note-button note-add-button" data-new-session-note aria-label="新建会话便签" title="新建会话便签">＋</button>`;
 }
 function sessionMarkerKey(taskId, sessionId) { return `${taskId}\u0000${sessionId}`; }
 function rememberCurrentSessionMessage() {
@@ -1044,6 +1077,8 @@ function queueTerminalWrite(data) {
   if (terminalWriteTimer === null) terminalWriteTimer = setTimeout(flushQueuedTerminalWrite, 16);
 }
 function disposeTerminal() {
+  clearTerminalSearch();
+  terminalSearchAddon?.dispose(); terminalSearchAddon = null;
   terminalResizeObserver?.disconnect(); terminalResizeObserver = null;
   terminalCursorSubscription?.dispose(); terminalCursorSubscription = null;
   terminalWriteParsedSubscription?.dispose(); terminalWriteParsedSubscription = null;
@@ -1113,7 +1148,7 @@ async function openNativeTui() {
     document.body.classList.add('tui-active');
     const box = $('#session-terminal');
     try {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs')]);
+      const [{ Terminal }, { FitAddon }, { SearchAddon }] = await Promise.all([import('/vendor/xterm/lib/xterm.mjs'), import('/vendor/xterm-fit/addon-fit.mjs'), import('/vendor/xterm-search/addon-search.mjs')]);
       if (state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return;
       terminal = new Terminal({ cursorBlink: false, cursorStyle: 'bar', cursorWidth: 2, convertEol: true, scrollback: 10000, scrollOnUserInput: false, fontSize: 13, fontFamily: terminalFontFamily(), theme: terminalTheme() });
       const browserPlatform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
@@ -1121,6 +1156,12 @@ async function openNativeTui() {
       terminal.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
         const key = event.key.toLowerCase();
+        if ((event.ctrlKey || event.metaKey) && key === 'f') {
+          event.preventDefault();
+          event.stopPropagation();
+          focusTerminalSearch(true);
+          return false;
+        }
         if (!event.ctrlKey && !(event.metaKey && key === 'v')) return true;
         if (key === 'c' && terminal.hasSelection()) {
           event.preventDefault();
@@ -1144,7 +1185,11 @@ async function openNativeTui() {
         }
         return true;
       });
-      fitAddon = new FitAddon(); terminal.loadAddon(fitAddon); terminal.open(box); fitAddon.fit(); ensureTerminalInputFocus();
+      fitAddon = new FitAddon(); terminal.loadAddon(fitAddon); terminal.open(box); fitAddon.fit();
+      terminalSearchAddon = new SearchAddon();
+      terminal.loadAddon(terminalSearchAddon);
+      searchTerminal();
+      ensureTerminalInputFocus();
       terminalImeCursorHandler = (event) => {
         if (event?.type === 'compositionstart') {
           terminalImeComposing = true;
@@ -1770,6 +1815,7 @@ function closeThemeMenu() {
   menu.classList.add('hidden');
   $('#style-toggle').setAttribute('aria-expanded', 'false');
 }
+let topbarNoteMenuAnchor = null;
 function openTopbarNotePanel(note) {
   const panel = $('#topbar-note-panel');
   if (!panel) return;
@@ -1779,10 +1825,40 @@ function openTopbarNotePanel(note) {
   panel.classList.remove('hidden');
 }
 function closeTopbarNotePanel() {
+  topbarNoteMenuAnchor?.setAttribute('aria-expanded', 'false');
+  topbarNoteMenuAnchor = null;
+  document.querySelector('.topbar-note-menu')?.remove();
   const panel = $('#topbar-note-panel');
   if (!panel) return;
   delete panel.dataset.noteId;
   panel.classList.add('hidden');
+}
+function openTopbarNoteMenu(button, note) {
+  closeTopbarNotePanel();
+  const menu = document.createElement('div');
+  menu.className = 'session-note-menu topbar-note-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `<div class="session-note-menu-title">${esc(note.title?.trim() || '便签')}</div><button type="button" role="menuitem" data-topbar-note-action="details">查看详情</button><button type="button" role="menuitem" data-topbar-note-action="copy-description">复制描述</button><button type="button" role="menuitem" data-topbar-note-action="edit">编辑</button><button type="button" role="menuitem" data-topbar-note-action="remove">取消标记</button>`;
+  document.body.append(menu);
+  const rect = button.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.min(Math.max(8, rect.right - menu.offsetWidth), window.innerWidth - menu.offsetWidth - 8);
+  const top = rect.bottom + menu.offsetHeight + gap <= window.innerHeight
+    ? rect.bottom + gap
+    : Math.max(8, rect.top - menu.offsetHeight - gap);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  topbarNoteMenuAnchor = button;
+  button.setAttribute('aria-expanded', 'true');
+  menu.onclick = (event) => {
+    const action = event.target.closest('[data-topbar-note-action]');
+    if (!action) return;
+    closeTopbarNotePanel();
+    if (action.dataset.topbarNoteAction === 'details') openTopbarNotePanel(note);
+    else if (action.dataset.topbarNoteAction === 'copy-description') void copySessionNoteDescription(note);
+    else if (action.dataset.topbarNoteAction === 'edit') openNoteForm(note);
+    else void removeTopbarNote(note);
+  };
 }
 function toggleThemeMenu(focusSelector) {
   const menu = $('#theme-menu');
@@ -1808,8 +1884,8 @@ $('#theme-menu').onclick = (event) => {
 };
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#style-toggle, #mode-toggle, #theme-menu')) closeThemeMenu();
-  if (!event.target.closest('#topbar-note-buttons')) closeTopbarNotePanel();
-  if (!event.target.closest('#session-note-buttons, .session-note-menu')) closeSessionNoteMenu();
+  if (!event.target.closest('#topbar-note-buttons, .topbar-note-menu')) closeTopbarNotePanel();
+  if (!event.target.closest('#session-note-buttons, .session-note-menu:not(.topbar-note-menu)')) closeSessionNoteMenu();
   if (!event.target.closest('#session-context-copy')) {
     closeSessionActionMenu();
     if (sessionTaskDetailsOpen) closeSessionTaskDetails();
@@ -1886,14 +1962,60 @@ $('#archive-toggle').onclick = () => {
 // 任务入口只创建任务，不预建会话。
 $('#sidebar-new-task').onclick = () => openTaskForm();
 $('#sidebar-new-note').onclick = () => openNewBoardItem('notes');
+$('#toolbar-new-item').onclick = () => openNewBoardItem(state.boardType);
 $('#sidebar-new-session-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
+function clearTerminalSearch() {
+  const input = $('#terminal-search-input');
+  if (!input) return;
+  input.value = '';
+  $('#terminal-search-results').textContent = '';
+  terminalSearchAddon?.clearDecorations();
+}
+function focusTerminalSearch(select = false) {
+  const panel = $('#terminal-search');
+  const input = $('#terminal-search-input');
+  if (!panel || !input) return;
+  panel.classList.remove('hidden');
+  input.focus();
+  if (select) input.select();
+}
+function searchTerminal(previous = false) {
+  const input = $('#terminal-search-input');
+  const results = $('#terminal-search-results');
+  const term = input?.value || '';
+  if (!term) {
+    terminalSearchAddon?.clearDecorations();
+    if (results) results.textContent = '';
+    return;
+  }
+  if (!terminalSearchAddon) {
+    if (results) results.textContent = '终端未就绪';
+    return;
+  }
+  const found = previous
+    ? terminalSearchAddon.findPrevious(term)
+    : terminalSearchAddon.findNext(term);
+  if (results) results.textContent = found ? '' : '未找到';
+}
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
+$('#terminal-search-previous').onclick = () => searchTerminal(true);
+$('#terminal-search-next').onclick = () => searchTerminal();
+$('#terminal-search-input').oninput = () => searchTerminal();
+$('#terminal-search-input').onkeydown = (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    clearTerminalSearch();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    searchTerminal(event.shiftKey);
+  }
+};
 // 会话页的空白区域不应把焦点从终端输入框移走；真正的交互控件仍保留自己的焦点行为。
 function keepTerminalFocusOnBlankArea(event) {
   if (state.module !== 'session' || !terminal || $('.modal')) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
-  if (target.closest('button, a, input, select, textarea, [contenteditable="true"], [tabindex]:not([tabindex="-1"]), [role="button"], [role="tab"], [role="menuitem"], .session-description-panel, .session-note-menu, .xterm')) return;
+  if (target.closest('button, a, input, select, textarea, [contenteditable="true"], [tabindex]:not([tabindex="-1"]), [role="button"], [role="tab"], [role="menuitem"], .session-name-title, .session-description-panel, .session-note-menu, .xterm')) return;
   // 阻止浏览器在空白控制带上产生临时焦点，再把焦点交还给终端。
   if (event.type === 'pointerdown') event.preventDefault();
   ensureTerminalInputFocus();
@@ -1948,14 +2070,14 @@ let sessionNoteMenuAnchor = null;
 function closeSessionNoteMenu() {
   sessionNoteMenuAnchor?.setAttribute('aria-expanded', 'false');
   sessionNoteMenuAnchor = null;
-  document.querySelector('.session-note-menu')?.remove();
+  document.querySelector('.session-note-menu:not(.topbar-note-menu)')?.remove();
 }
 function openSessionNoteMenu(button, note) {
   closeSessionNoteMenu();
   const menu = document.createElement('div');
   menu.className = 'session-note-menu';
   menu.setAttribute('role', 'menu');
-  menu.innerHTML = `<div class="session-note-menu-title">${esc(note.title?.trim() || '便签')}</div><button type="button" role="menuitem" data-session-note-mode="current">发送到当前会话</button><button type="button" role="menuitem" data-session-note-mode="new">新建后台会话并发送</button><button type="button" role="menuitem" data-session-note-action="edit">编辑</button><button type="button" role="menuitem" data-session-note-action="remove">取消标记</button>`;
+  menu.innerHTML = `<div class="session-note-menu-title">${esc(note.title?.trim() || '便签')}</div><button type="button" role="menuitem" data-session-note-mode="current">发送到当前会话</button><button type="button" role="menuitem" data-session-note-mode="new">新建后台会话并发送</button><button type="button" role="menuitem" data-session-note-action="copy-description">复制描述</button><button type="button" role="menuitem" data-session-note-action="edit">编辑</button><button type="button" role="menuitem" data-session-note-action="remove">取消标记</button>`;
   document.body.append(menu);
   const rect = button.getBoundingClientRect();
   const gap = 8;
@@ -1971,7 +2093,8 @@ function openSessionNoteMenu(button, note) {
     const action = event.target.closest('[data-session-note-action]');
     if (action) {
       closeSessionNoteMenu();
-      if (action.dataset.sessionNoteAction === 'edit') openNoteForm(note);
+      if (action.dataset.sessionNoteAction === 'copy-description') void copySessionNoteDescription(note);
+      else if (action.dataset.sessionNoteAction === 'edit') openNoteForm(note);
       else void removeSessionNote(note);
       return;
     }
@@ -1993,11 +2116,28 @@ async function sendSessionNote(note, mode) {
     return result;
   } catch (error) { toast(error.message, 'error'); }
 }
+async function copySessionNoteDescription(note) {
+  const description = note.description?.trim();
+  if (!description) return toast('便签没有描述内容', 'error');
+  try {
+    await navigator.clipboard.writeText(description);
+    toast('便签描述已复制');
+  } catch {
+    toast('复制失败，请手动选择内容', 'error');
+  }
+}
 async function removeSessionNote(note) {
   try {
     await api(`/notes/${note.id}`, { method: 'PUT', body: { pinnedToSessionBar: false } });
     await refresh();
     toast('已移除会话标记');
+  } catch (error) { toast(error.message, 'error'); }
+}
+async function removeTopbarNote(note) {
+  try {
+    await api(`/notes/${note.id}`, { method: 'PUT', body: { pinnedToTopBar: false } });
+    await refresh();
+    toast('已取消提醒标记');
   } catch (error) { toast(error.message, 'error'); }
 }
 function finishNoteDrag(commit = false) {
@@ -2061,13 +2201,12 @@ $('#topbar-note-buttons').onclick = (event) => {
   if (!button) return;
   const note = currentNote(button.dataset.topbarNote);
   if (!note) return;
-  const panel = $('#topbar-note-panel');
-  if (panel && !panel.classList.contains('hidden') && panel.dataset.noteId === note.id) {
+  if (topbarNoteMenuAnchor === button) {
     closeTopbarNotePanel();
     button.blur();
     return;
   }
-  openTopbarNotePanel(note);
+  openTopbarNoteMenu(button, note);
 };
 $('#session-note-buttons').onclick = (event) => {
   if (Date.now() < suppressNoteClickUntil) return;
