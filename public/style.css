@@ -2,7 +2,7 @@
 
 :root {
   --topbar-height: 44px;
-  --sidebar-width: 216px;
+  --sidebar-width: 208px;
   color-scheme: light;
   --bg: #edf1f2;
   --surface: #fbfcfa;
@@ -1499,6 +1499,12 @@ body.theme-newspaper.theme-dark {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* 回收站按钮使用独立的 16px 线性图标，避免 13px 缩放时盖子与桶身糊成一条线。 */
+#archive-toggle svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.7;
+}
 .workspace-module-button:hover,
 .workspace-module-button:focus-visible {
   border-color: transparent;
@@ -1530,13 +1536,13 @@ body.theme-newspaper .topbar { border-bottom: 0; }
 #app-sidebar .sidebar-nav { border: 0; border-bottom: 1px solid var(--line); }
 .bottom-bar-controls > .sidebar-header {
   justify-content: space-between;
-  gap: 0;
+  gap: 5px;
   border: 0;
 }
 .bottom-bar-controls .sidebar-header-actions { margin-left: 0; gap: 3px; }
 body.sidebar-collapsed #app-sidebar { border-right: 0; }
 /* 顶部控制组与底部控制组交换后，仍保持同一按钮规格和紧凑间距。 */
-.topbar-brand { gap: 0; }
+.topbar-brand { gap: 5px; }
 .topbar-brand .workspace-history-controls,
 .bottom-bar-controls .sidebar-header-actions,
 .bottom-bar-controls .workspace-module-nav { display: contents; }
@@ -2193,6 +2199,29 @@ body.theme-geek .session-toolbar-intro .session-name-title:hover:not(:disabled) 
   min-height: 0;
   overflow: hidden;
 }
+/* 展开态用一条跨越顶部、内容和底栏的连续分割线，确保左右两区对齐。 */
+body:not(.sidebar-collapsed) #workbench-layout::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sidebar-width) - 1px);
+  z-index: 20;
+  width: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
+}
+body.theme-geek:not(.sidebar-collapsed) #workbench-layout::before {
+  width: 0;
+  background: transparent;
+  border-left: 1px dashed var(--line);
+}
+body.theme-newspaper:not(.sidebar-collapsed) #workbench-layout::before {
+  left: calc(var(--sidebar-width) - 3px);
+  width: 0;
+  background: transparent;
+  border-left: 3px double var(--line-strong);
+}
 #workbench-layout > .topbar-brand {
   grid-column: 1;
   grid-row: 1;
@@ -2356,6 +2385,7 @@ body.theme-classic #workbench-layout > .bottom-bar-controls { background: var(--
 body.theme-aurora #workbench-layout > .bottom-bar-controls { background: color-mix(in srgb, var(--surface) 90%, transparent); }
 body.theme-newspaper #workbench-layout > .bottom-bar-controls { background: var(--surface); }
 @media (max-width: 760px) {
+  body:not(.sidebar-collapsed) #workbench-layout::before { display: none; }
   #workbench-layout {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
     grid-template-rows: auto 180px minmax(0, 1fr) 42px;
@@ -2414,22 +2444,26 @@ html, body { height: 100%; }
 #workspace-page-header > #task-toolbar { gap: 8px; padding: 0 7px; }
 #workspace-page-header > #task-toolbar .board-filter-tabs,
 #workspace-page-header > #task-toolbar .toolbar-controls {
-  height: 32px;
-  min-height: 32px;
+  height: 28px;
+  min-height: 28px;
 }
 #workspace-page-header > #task-toolbar .board-filter-option {
-  min-height: 32px;
+  min-height: 28px;
   padding-right: 10px;
   padding-left: 10px;
 }
 #workspace-page-header > #task-toolbar .board-search-field input,
 #workspace-page-header > #task-toolbar .layout-toggle {
-  height: 32px;
-  min-height: 32px;
+  height: 28px;
+  min-height: 28px;
 }
 #workspace-page-header > #task-toolbar .layout-toggle {
-  width: 32px;
-  min-width: 32px;
+  width: 28px;
+  min-width: 28px;
+}
+#workspace-page-header > #task-toolbar .toolbar-controls,
+#workspace-page-header > #task-toolbar .toolbar-tools {
+  gap: 5px;
 }
 #toolbar-new-item {
   border-color: var(--accent) !important;
@@ -2577,6 +2611,13 @@ body.session-mode .session-main { padding-bottom: 0; }
   .task-board-column { padding: 8px; }
 }
 
+/* 会话顶部栏的标题、控制组和终端搜索控件统一使用 5px 间距。 */
+#workbench-layout > .topbar > .session-header .session-toolbar-intro,
+#workbench-layout > .topbar > .session-header .session-title-row,
+#workbench-layout > .topbar > .session-header .session-controls,
+#workbench-layout > .topbar > .session-header .terminal-search {
+  gap: 5px;
+}
 /* 底部便签停靠在右端：提醒流在其左侧渐隐，详情面板向左展开。 */
 #workbench-layout > .session-bottom-bar .session-note-buttons {
   margin-left: auto;
@@ -2594,3 +2635,114 @@ body.session-mode .session-main { padding-bottom: 0; }
 #workbench-layout > .session-bottom-bar { padding-right: 7px; }
 /* 提醒流与底栏内容区同样保留 7px 的左右安全边距。 */
 #workbench-layout > .session-bottom-bar #toast-root { inset: 0 7px; }
+
+/* π 标识与控制按钮统一为 28px；窄屏继续与窄屏按钮同步缩小。 */
+#workbench-layout > .topbar-brand .brand-mark,
+#workbench-layout > .bottom-bar-controls > .sidebar-header .brand-mark {
+  width: 28px;
+  height: 28px;
+}
+@media (max-width: 760px) {
+  #workbench-layout > .topbar-brand .brand-mark,
+  #workbench-layout > .bottom-bar-controls > .sidebar-header .brand-mark {
+    width: 25px;
+    height: 25px;
+  }
+}
+
+/* π 标识移动到左上控制区后，继续沿用原有的像素化主题笔画。 */
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench-layout > .topbar-brand .brand-mark {
+  position: relative;
+  font-size: 0;
+}
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench-layout > .topbar-brand .brand-mark::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  transform: translate(-10px, -10px);
+  box-shadow: 5px 0 currentColor, 10px 0 currentColor,
+    0 5px currentColor, 10px 5px currentColor,
+    0 10px currentColor, 5px 10px currentColor, 15px 10px currentColor,
+    0 15px currentColor, 15px 15px currentColor;
+}
+
+/* 会话树搜索与排序是底部控制区的轻量浮层，不改变网格宽度。 */
+.session-tree-tool-panel {
+  position: absolute;
+  left: 7px;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: min(300px, calc(100vw - 24px));
+  padding: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.session-tree-tool-panel label,
+.session-tree-tool-title {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.session-tree-search-row { display: flex; align-items: center; gap: 5px; }
+#session-tree-search-input {
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+#session-tree-search-input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+#session-tree-search-clear {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+#session-tree-search-clear:hover { border-color: var(--accent); color: var(--accent-strong); }
+.session-tree-sort-menu { width: 190px; padding: 7px; }
+.session-tree-sort-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 29px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+}
+.session-tree-sort-menu button:hover,
+.session-tree-sort-menu button[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.session-tree-sort-menu button[aria-checked="true"]::after { content: "✓"; margin-left: auto; }
+@media (max-width: 760px) {
+  #workbench-layout > .topbar-brand,
+  #workbench-layout > .bottom-bar-controls > .sidebar-header { gap: 3px; }
+  .session-tree-tool-panel { left: 7px; right: 7px; width: auto; }
+  .session-tree-sort-menu { width: auto; }
+}

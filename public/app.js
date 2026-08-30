@@ -64,6 +64,21 @@ let marqueeMotion = null;
 let renderedPinnedNotesSignature = '';
 let renderedSessionTreeSignature = '';
 let sessionTreeClickTimer = null;
+const SESSION_TREE_SORT_OPTIONS = [
+  { value: 'created', label: '按创建时间' },
+  { value: 'updated', label: '按最近更新' },
+  { value: 'title', label: '按标题名称' },
+  { value: 'path', label: '按工作路径' },
+  { value: 'color', label: '按颜色标签' },
+  { value: 'status', label: '按任务状态' },
+];
+const SESSION_TREE_SORT_VALUES = new Set(SESSION_TREE_SORT_OPTIONS.map((option) => option.value));
+let sessionTreeQuery = '';
+let sessionTreeSort = SESSION_TREE_SORT_VALUES.has(localStorage.getItem('workbench-session-tree-sort'))
+  ? localStorage.getItem('workbench-session-tree-sort')
+  : 'updated';
+let sessionTreeSearchOpen = false;
+let sessionTreeSortOpen = false;
 let noteDragTimer = null;
 let noteDrag = null;
 let suppressNoteClickUntil = 0;
@@ -244,11 +259,13 @@ const BOARD_GROUP_ICONS = {
   kind: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="13" height="14" rx="1.5"/><path d="M8 4h11a1 1 0 0 1 1 1v12"/></svg>',
   noteCategory: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="6" height="6" rx="1"/><rect x="14" y="5" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>',
 };
+const EMPTY_TRASH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5h6v2"/><path d="M7 8h10l-1 12H8L7 8Z"/><path d="m10 11 4 4m0-4-4 4"/></svg>';
 function syncTaskToolbarTitle() {
   const archived = state.status === 'archived';
   const notes = !archived && state.boardType === 'notes';
   const clearArchivedButton = $('#purge-archived');
   if (clearArchivedButton) {
+    clearArchivedButton.innerHTML = EMPTY_TRASH_ICON;
     const archivedTaskCount = state.tasks.filter((task) => task.status === 'archived').length;
     const archivedNoteCount = state.notes.filter((note) => note.status === 'archived').length;
     const archivedCounts = { all: archivedTaskCount + archivedNoteCount, tasks: archivedTaskCount, notes: archivedNoteCount };
@@ -886,6 +903,50 @@ function showSessionTask(taskId) {
 function sessionTasks() {
   return state.tasks.filter((task) => (availableSessions(task).length > 0 || state.sessionTaskIds.has(task.id)) && !state.hiddenCompletedSessionTasks.has(task.id));
 }
+function sessionTreeText(value) {
+  return String(value || '').trim().toLocaleLowerCase('zh-CN');
+}
+function sessionTreeTime(value) {
+  const timestamp = Date.parse(value || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+function sessionTreeLatestUpdate(task) {
+  return Math.max(sessionTreeTime(task?.updatedAt), ...availableSessions(task).map((session) => sessionTreeTime(session.updatedAt)));
+}
+function sessionTreeCompareText(a, b) {
+  return sessionTreeText(a).localeCompare(sessionTreeText(b), 'zh-CN', { numeric: true, sensitivity: 'base' });
+}
+function sessionTreeCompareTasks(a, b) {
+  const option = sessionTreeSort;
+  let result = 0;
+  if (option === 'created') result = sessionTreeTime(b.createdAt) - sessionTreeTime(a.createdAt);
+  else if (option === 'updated') result = sessionTreeLatestUpdate(b) - sessionTreeLatestUpdate(a);
+  else if (option === 'title') result = sessionTreeCompareText(a.title, b.title);
+  else if (option === 'path') result = sessionTreeCompareText(a.workingDir, b.workingDir);
+  else if (option === 'color') {
+    const colors = Object.keys(colorCatalog());
+    result = (colors.indexOf(taskColor(a)) + 1 || Number.MAX_SAFE_INTEGER) - (colors.indexOf(taskColor(b)) + 1 || Number.MAX_SAFE_INTEGER);
+  } else if (option === 'status') {
+    const statusOrder = { unfinished: 0, done: 1, archived: 2 };
+    result = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+  }
+  return result || sessionTreeCompareText(a.title, b.title) || String(a.id || '').localeCompare(String(b.id || ''));
+}
+function sessionTreeCompareSessions(a, b) {
+  let result = 0;
+  if (sessionTreeSort === 'created') result = sessionTreeTime(b.createdAt) - sessionTreeTime(a.createdAt);
+  else if (sessionTreeSort === 'updated') result = sessionTreeTime(b.updatedAt) - sessionTreeTime(a.updatedAt);
+  else if (sessionTreeSort === 'title') result = sessionTreeCompareText(a.title, b.title);
+  return result || sessionTreeCompareText(a.title, b.title) || String(a.id || '').localeCompare(String(b.id || ''));
+}
+function sessionTreeVisibleTasks() {
+  const query = sessionTreeText(sessionTreeQuery);
+  return sessionTasks().map((task) => {
+    const taskMatches = !query || sessionTreeText(task.title).includes(query);
+    const sessions = availableSessions(task).filter((session) => taskMatches || sessionTreeText(session.title || '新会话').includes(query)).sort(sessionTreeCompareSessions);
+    return { task, sessions, taskMatches };
+  }).filter(({ sessions, taskMatches }) => !query || taskMatches || sessions.length).sort(({ task: a }, { task: b }) => sessionTreeCompareTasks(a, b));
+}
 function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
   renderSessionNoteButtons();
@@ -959,34 +1020,38 @@ function sessionItemMarkup(task, session, index) {
   const unreadLabel = unread > 99 ? '99+' : String(unread);
   return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-title-text-viewport"><span class="session-child-name session-title-text" data-tooltip="${esc(title)}">${esc(title)}</span></span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`;
 }
-function sessionGroupMarkup(task) {
+function sessionGroupMarkup(task, visibleSessions = availableSessions(task)) {
   const collapsed = state.collapsedSessionTasks.has(task.id);
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
   const taskActions = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
-  const sessions = availableSessions(task).map((session, index) => sessionItemMarkup(task, session, index)).join('');
+  const sessions = visibleSessions.map((session, index) => sessionItemMarkup(task, session, index)).join('');
   const items = collapsed ? '' : sessions;
   return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text task-status-${esc(task.status)}" data-tooltip="${esc(task.title)}">${esc(task.title)}</span></span></button>${taskActions}</div>${items}</div>`;
 }
 function renderSessionTree() {
   renderSessionHeader();
+  const visibleTasks = sessionTreeVisibleTasks();
   const tasks = sessionTasks();
   // 终端输入/输出也会触发刷新；树结构未变化时不要重建 DOM，避免标题滚动动画从头开始。
   const treeSignature = JSON.stringify({
     module: state.module,
     sessionTask: state.sessionTask,
     sessionSessionId: state.sessionSessionId,
+    query: sessionTreeQuery,
+    sort: sessionTreeSort,
     collapsed: [...state.collapsedSessionTasks].sort(),
-    tasks: tasks.map((task) => [task.id, task.title, task.status, task.color, availableSessions(task).map((session) => [session.id, session.title])]),
+    tasks: visibleTasks.map(({ task, sessions }) => [task.id, task.title, task.status, task.color, task.createdAt, task.updatedAt, sessions.map((session) => [session.id, session.title, session.createdAt, session.updatedAt])]),
   });
   if (treeSignature === renderedSessionTreeSignature) {
     syncSessionTreeUnread(tasks);
     return;
   }
   renderedSessionTreeSignature = treeSignature;
-  $('#session-tree').innerHTML = tasks.length
-    ? tasks.map(sessionGroupMarkup).join('')
-    : '<div class="empty sidebar-empty">暂无可打开的会话</div>';
+  const emptyText = sessionTreeText(sessionTreeQuery) ? '没有匹配的任务或会话' : '暂无可打开的会话';
+  $('#session-tree').innerHTML = visibleTasks.length
+    ? visibleTasks.map(({ task, sessions }) => sessionGroupMarkup(task, sessions)).join('')
+    : `<div class="empty sidebar-empty">${emptyText}</div>`;
   syncOverflowTooltips($('#session-tree'));
   syncSessionTreeUnread(tasks);
 }
@@ -1882,6 +1947,42 @@ function closeThemeMenu() {
   menu.classList.add('hidden');
   $('#style-toggle').setAttribute('aria-expanded', 'false');
 }
+function syncSessionTreeToolState() {
+  const searchToggle = $('#session-tree-search-toggle');
+  const sortToggle = $('#session-tree-sort-toggle');
+  const searchPanel = $('#session-tree-search-panel');
+  const sortMenu = $('#session-tree-sort-menu');
+  searchToggle?.classList.toggle('active', sessionTreeSearchOpen || Boolean(sessionTreeQuery.trim()));
+  searchToggle?.setAttribute('aria-expanded', String(sessionTreeSearchOpen));
+  sortToggle?.classList.toggle('active', sessionTreeSortOpen);
+  sortToggle?.setAttribute('aria-expanded', String(sessionTreeSortOpen));
+  searchPanel?.classList.toggle('hidden', !sessionTreeSearchOpen);
+  sortMenu?.classList.toggle('hidden', !sessionTreeSortOpen);
+  const input = $('#session-tree-search-input');
+  if (input && input.value !== sessionTreeQuery) input.value = sessionTreeQuery;
+  document.querySelectorAll('[data-session-sort]').forEach((button) => {
+    button.setAttribute('aria-checked', String(button.dataset.sessionSort === sessionTreeSort));
+  });
+}
+function closeSessionTreeTools() {
+  if (!sessionTreeSearchOpen && !sessionTreeSortOpen) return;
+  sessionTreeSearchOpen = false;
+  sessionTreeSortOpen = false;
+  syncSessionTreeToolState();
+}
+function toggleSessionTreeSearch() {
+  sessionTreeSearchOpen = !sessionTreeSearchOpen;
+  if (sessionTreeSearchOpen) sessionTreeSortOpen = false;
+  if (sessionTreeSearchOpen) closeThemeMenu();
+  syncSessionTreeToolState();
+  if (sessionTreeSearchOpen) requestAnimationFrame(() => $('#session-tree-search-input')?.focus());
+}
+function toggleSessionTreeSort() {
+  sessionTreeSortOpen = !sessionTreeSortOpen;
+  if (sessionTreeSortOpen) sessionTreeSearchOpen = false;
+  if (sessionTreeSortOpen) closeThemeMenu();
+  syncSessionTreeToolState();
+}
 let topbarNoteMenuAnchor = null;
 function openTopbarNotePanel(note) {
   const panel = $('#topbar-note-panel');
@@ -1951,6 +2052,14 @@ $('#theme-menu').onclick = (event) => {
 };
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#style-toggle, #mode-toggle, #theme-menu')) closeThemeMenu();
+  if (!event.target.closest('#session-tree-search-toggle, #session-tree-search-panel')) {
+    sessionTreeSearchOpen = false;
+    syncSessionTreeToolState();
+  }
+  if (!event.target.closest('#session-tree-sort-toggle, #session-tree-sort-menu')) {
+    sessionTreeSortOpen = false;
+    syncSessionTreeToolState();
+  }
   if (!event.target.closest('#topbar-note-buttons, .topbar-note-menu')) closeTopbarNotePanel();
   if (!event.target.closest('#session-note-buttons, .session-note-menu:not(.topbar-note-menu)')) closeSessionNoteMenu();
   if (!event.target.closest('#session-context-copy')) {
@@ -1961,6 +2070,7 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeThemeMenu(); closeTopbarNotePanel(); closeSessionNoteMenu();
+    closeSessionTreeTools();
     closeSessionActionMenu();
     if (sessionTaskDetailsOpen) closeSessionTaskDetails();
   }
@@ -1996,6 +2106,44 @@ $('#module-sessions').onclick = openLastSession;
 $('#workspace-module-tasks').onclick = () => openBoardType('tasks');
 $('#workspace-module-notes').onclick = () => openBoardType('notes');
 $('#workspace-module-session').onclick = openLastSession;
+$('#session-tree-search-toggle').onclick = (event) => {
+  event.stopPropagation();
+  toggleSessionTreeSearch();
+};
+$('#session-tree-sort-toggle').onclick = (event) => {
+  event.stopPropagation();
+  toggleSessionTreeSort();
+};
+$('#session-tree-search-input').oninput = (event) => {
+  sessionTreeQuery = event.target.value;
+  renderSessionTree();
+  syncSessionTreeToolState();
+};
+$('#session-tree-search-input').onkeydown = (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSessionTreeTools();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    event.target.select();
+  }
+};
+$('#session-tree-search-clear').onclick = (event) => {
+  event.stopPropagation();
+  sessionTreeQuery = '';
+  renderSessionTree();
+  syncSessionTreeToolState();
+  $('#session-tree-search-input')?.focus();
+};
+$('#session-tree-sort-menu').onclick = (event) => {
+  const option = event.target.closest('[data-session-sort]');
+  if (!option || !SESSION_TREE_SORT_VALUES.has(option.dataset.sessionSort)) return;
+  sessionTreeSort = option.dataset.sessionSort;
+  localStorage.setItem('workbench-session-tree-sort', sessionTreeSort);
+  sessionTreeSortOpen = false;
+  renderSessionTree();
+  syncSessionTreeToolState();
+};
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
   state.sidebarCollapsed = collapsed;
@@ -2035,7 +2183,9 @@ function clearTerminalSearch() {
   const input = $('#terminal-search-input');
   if (!input) return;
   input.value = '';
-  $('#terminal-search-results').textContent = '';
+  const results = $('#terminal-search-results');
+  results.textContent = '';
+  results.hidden = true;
   terminalSearchAddon?.clearDecorations();
 }
 function focusTerminalSearch(select = false) {
@@ -2052,18 +2202,19 @@ function searchTerminal(previous = false) {
   const term = input?.value || '';
   if (!term) {
     terminalSearchAddon?.clearDecorations();
-    if (results) results.textContent = '';
+    if (results) { results.textContent = ''; results.hidden = true; }
     return;
   }
   if (!terminalSearchAddon) {
-    if (results) results.textContent = '终端未就绪';
+    if (results) { results.textContent = '终端未就绪'; results.hidden = false; }
     return;
   }
   const found = previous
     ? terminalSearchAddon.findPrevious(term)
     : terminalSearchAddon.findNext(term);
-  if (results) results.textContent = found ? '' : '未找到';
+  if (results) { results.textContent = found ? '' : '未找到'; results.hidden = Boolean(found); }
 }
+$('#terminal-search-results').hidden = true;
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
 $('#terminal-search-previous').onclick = () => searchTerminal(true);
 $('#terminal-search-next').onclick = () => searchTerminal();
