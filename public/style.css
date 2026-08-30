@@ -194,6 +194,47 @@ h1, h2, h3 { text-wrap: balance; }
 .theme-menu-option:hover { border-color: var(--line); background: var(--surface-muted); color: var(--ink); }
 .theme-menu-option.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--accent-strong); font-weight: 700; }
 .theme-menu-option.active::after { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.display-settings-menu,
+.display-settings-submenu {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+.display-settings-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 4px;
+  z-index: 20;
+  width: 142px;
+  padding: 6px;
+}
+.display-settings-item { position: relative; }
+.display-settings-item > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.display-settings-item:hover > button,
+.display-settings-item:focus-within > button { border-color: var(--line); background: var(--surface-muted); color: var(--accent-strong); }
+.display-settings-submenu {
+  position: absolute;
+  top: -6px;
+  left: 100%;
+  display: none;
+  width: 192px;
+  padding: 6px;
+}
+.display-settings-item:hover > .display-settings-submenu,
+.display-settings-item:focus-within > .display-settings-submenu { display: grid; }
 .stats { display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
 .chip, .badge {
   display: inline-flex;
@@ -377,6 +418,7 @@ h1, h2, h3 { text-wrap: balance; }
 .sidebar-action,
 .task-group-item,
 .session-task-title,
+.session-path-title,
 .session-child-open {
   padding-top: 0;
   padding-bottom: 0;
@@ -647,8 +689,14 @@ h1, h2, h3 { text-wrap: balance; }
 .color-add:hover { color: var(--accent-strong); }
 .color-native-input { position: absolute; width: 1px !important; height: 1px; padding: 0 !important; opacity: 0; pointer-events: none; }
 
-.overlay { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(18, 39, 48, .64); }
+.overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(18, 39, 48, .64); }
 .modal { width: min(560px, 100%); max-height: 90vh; overflow: auto; overscroll-behavior: contain; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); box-shadow: 0 24px 70px rgba(11, 29, 37, .24); }
+.modal.new-session-modal { overflow: visible; }
+.new-session-task-field .recent-dir-list { overflow-y: scroll; scrollbar-gutter: stable; }
+.new-session-task-field .recent-dir-list::-webkit-scrollbar { width: 10px; }
+.new-session-task-field .recent-dir-list::-webkit-scrollbar-track { background: var(--surface-muted); border-radius: 999px; }
+.new-session-task-field .recent-dir-list::-webkit-scrollbar-thumb { border: 2px solid var(--surface-muted); border-radius: 999px; background: color-mix(in srgb, var(--muted) 58%, transparent); }
+.new-session-task-field .recent-dir-list::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 .modal h2 { margin: 0 0 14px; font: 600 21px/1.2 Georgia, "Songti SC", serif; letter-spacing: -.03em; }
 .modal label { display: block; margin: 10px 0; color: var(--muted); font-weight: 700; }
 .field-error { display: block; margin-top: 6px; color: #b53d2b; font-size: 12px; font-weight: 600; }
@@ -663,7 +711,8 @@ body.theme-dark .modal input[aria-invalid="true"], body:not(.theme-light) .modal
 .hint { color: var(--muted); font-size: 13px; }
 .path-picker-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .working-dir-field { position: relative; flex: 1; min-width: 0; }
-.working-dir-field input { width: 100%; margin-top: 0; }
+.working-dir-field input { width: 100%; }
+.path-picker-row .working-dir-field input { margin-top: 0; }
 .path-picker-row .icon-button { flex: 0 0 36px; width: 36px; min-width: 36px; height: 40px; min-height: 40px; padding: 6px; }
 .recent-dir-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 7; max-height: 220px; overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); box-shadow: var(--shadow); }
 .recent-dir-option { display: flex; align-items: center; gap: 4px; }
@@ -713,27 +762,40 @@ body.session-mode.sidebar-collapsed #app-sidebar { flex-basis: 0; }
 body.session-mode .sidebar-panel { padding-top: 6px; }
 .session-task-group { margin: 2px 0 6px; }
 .session-task-group { min-width: 0; }
+.session-path-group { min-width: 0; margin: 2px 0 6px; }
 .session-task-heading { position: relative; display: flex; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: 6px; }
+.session-path-heading { position: relative; display: flex; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: 6px; }
 .session-task-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; overflow: hidden; padding: 8px 8px 8px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); font-weight: 700; cursor: pointer; text-align: left; transition: padding-right .14s ease; }
+.session-path-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; overflow: hidden; padding: 8px; border: 1px solid transparent; border-radius: 6px; background: var(--surface-muted); color: var(--ink); font: 600 11px/1.2 "SFMono-Regular", Consolas, monospace; cursor: pointer; text-align: left; transition: padding-right .14s ease; }
 .session-task-heading:hover .session-task-title,
 .session-task-heading:focus-within .session-task-title { padding-right: 40px; }
+.session-path-heading:hover .session-path-title,
+.session-path-heading:focus-within .session-path-title { padding-right: 28px; }
 .session-task-title > span:first-child { display: inline-block; width: 16px; flex: 0 0 16px; text-align: center; }
+.session-path-title > span:first-child { display: inline-block; width: 16px; flex: 0 0 16px; text-align: center; }
 .session-task-heading:hover,
 .session-task-heading:focus-within { border-color: var(--line); }
+.session-path-heading:hover,
+.session-path-heading:focus-within { border-color: var(--line); }
 .session-task-title:hover { border-color: transparent; }
+.session-path-title:hover { border-color: transparent; }
 .session-task-title:focus-visible { outline: none; }
+.session-path-title:focus-visible { outline: none; }
 .session-title-text.task-status-done { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .session-title-text.task-status-archived { text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: currentColor; }
 .session-task-heading:has(.session-task-title:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent) 28%, transparent); outline-offset: 2px; }
 /* 任务标题未被指向时收起操作按钮，避免侧栏视觉噪音。 */
 .session-task-heading > .session-new-child,
 .session-task-heading > .session-remove-task { position: absolute; top: 50%; z-index: 1; display: grid; place-items: center; width: 20px; min-width: 20px; height: 20px; min-height: 20px; padding: 0; line-height: 1; transform: translateY(-50%); visibility: hidden; opacity: 0; transition: opacity .14s ease, visibility 0s linear .14s; }
+.session-path-heading > .session-new-child { position: absolute; top: 50%; right: 0; z-index: 1; display: grid; place-items: center; width: 20px; min-width: 20px; height: 20px; min-height: 20px; padding: 0; line-height: 1; transform: translateY(-50%); visibility: hidden; opacity: 0; transition: opacity .14s ease, visibility 0s linear .14s; }
 .session-task-heading > .session-new-child { right: 20px; }
 .session-task-heading > .session-remove-task { right: 0; }
 .session-task-heading:hover > .session-new-child,
 .session-task-heading:hover > .session-remove-task,
 .session-task-heading:focus-within > .session-new-child,
 .session-task-heading:focus-within > .session-remove-task { visibility: visible; opacity: 1; transition-delay: 0s; }
+.session-path-heading:hover > .session-new-child,
+.session-path-heading:focus-within > .session-new-child { visibility: visible; opacity: 1; transition-delay: 0s; }
 /* 滚动文字的视口在图标之间渐隐，不覆盖或改变两侧按钮的样式。 */
 .session-title-text-viewport {
   display: block;
@@ -808,6 +870,20 @@ body.session-mode .sidebar-panel { padding-top: 6px; }
 .session-child-session:hover .session-child-delete,
 .session-child-session:focus-within .session-child-delete { visibility: visible; opacity: 1; transition-delay: 0s; }
 .session-child-delete:hover { background: transparent; border-color: transparent; color: var(--accent-strong); }
+.child-favorite { align-self: center; display: grid; place-items: center; width: 24px; min-width: 24px; height: calc(100% - 2px); min-height: 0; margin-left: 2px; padding: 0; border: 0; background: transparent; color: var(--teal); font-size: 16px; line-height: 1; }
+.child-favorite:hover, .child-favorite:focus-visible { border-color: transparent; background: var(--accent-soft); color: var(--accent-strong); }
+.child-favorite.favorite { color: var(--accent-strong); }
+.child-favorite.unread:not(.favorite) { color: var(--accent-strong); }
+.child-favorite.unread { text-shadow: 0 0 7px color-mix(in srgb, currentColor 48%, transparent); }
+.session-card-state { display: inline-grid; place-items: center; width: 15px; height: 15px; flex: 0 0 15px; color: var(--muted); font-size: 14px; line-height: 1; }
+.session-card-state.running { color: var(--teal); text-shadow: 0 0 8px color-mix(in srgb, var(--teal) 70%, transparent); }
+.session-card-favorite { color: var(--accent-strong); font-size: 15px; line-height: 1; }
+.session-card-task, .session-card-meta { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 11px; }
+.session-card-task { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-card-task svg, .session-card-meta svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-card-meta { flex-wrap: wrap; gap: 8px 13px; margin-top: 7px; font: 11px "SFMono-Regular", Consolas, monospace; }
+.session-card-meta > span { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-restore-state { display: inline-flex; align-items: center; min-height: 30px; padding: 0 7px; border: 1px dashed var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; }
 .sidebar-empty { padding: 30px 8px; }
 .session-layout, .session-main { height: 100%; min-height: 0; }
 .session-main { display: flex; flex-direction: column; }
@@ -825,6 +901,26 @@ button.session-context-icon:disabled { opacity: .52; cursor: default; }
 .session-action-menu button { width: 100%; padding: 8px 10px; border: 0; background: transparent; color: var(--ink); font-size: 12px; text-align: left; white-space: nowrap; }
 .session-action-menu button:hover:not(:disabled), .session-action-menu button:focus-visible { border-color: transparent; background: var(--accent-soft); color: var(--accent-strong); outline: none; }
 .session-action-menu button:disabled { opacity: .45; cursor: not-allowed; }
+.session-action-submenu-wrap { position: relative; }
+.session-action-submenu-wrap > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.session-action-submenu-wrap > button .session-action-copy-arrow { color: var(--muted); font-size: 14px; line-height: 1; }
+.session-action-submenu-wrap:hover > button .session-action-copy-arrow,
+.session-action-submenu-wrap:focus-within > button .session-action-copy-arrow { color: var(--accent-strong); }
+.session-action-submenu {
+  position: absolute;
+  top: -6px;
+  left: 100%;
+  z-index: 10;
+  display: none;
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+.session-action-submenu-wrap:hover > .session-action-submenu,
+.session-action-submenu-wrap:focus-within > .session-action-submenu { display: grid; gap: 2px; }
 .session-title-row .session-name-title { min-width: 0; flex: 1 1 auto; }
 .session-title-row .session-file-copy { flex: 0 0 auto; }
 .session-file-row { display: flex; align-items: center; gap: 4px; max-width: 520px; margin-top: 5px; }
@@ -988,8 +1084,8 @@ body {
 body {
   overflow: hidden;
 }
-/* 打开主题菜单时允许它越过侧栏边界，并确保显示在右侧工作区之上。 */
-.topbar:has(#theme-menu:not(.hidden)) {
+/* 打开显示设置时允许它越过侧栏边界，并确保显示在右侧工作区之上。 */
+.topbar:has(#display-settings-menu:not(.hidden)) {
   z-index: 5;
   overflow: visible;
 }
@@ -1453,7 +1549,7 @@ body.sidebar-collapsed #app-sidebar { border-right: 0; }
   color: var(--accent-strong);
 }
 .topbar-brand .workspace-module-button.active,
-.topbar-brand #style-toggle[aria-expanded="true"],
+.topbar-brand #display-settings-toggle[aria-expanded="true"],
 .topbar-brand #sidebar-toggle[aria-expanded="false"] {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
   background: var(--accent-soft);
@@ -1486,29 +1582,29 @@ body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) .bottom-ba
 }
 
 /* 主题收口：浮层、结构线和错误提示也遵循各自的材质，不再停留在通用圆角。 */
-body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) :is(.session-action-menu, .session-note-menu) {
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) :is(.session-action-menu, .session-action-submenu, .session-note-menu) {
   border-color: var(--line-strong);
   background: var(--surface-raised);
   color: var(--ink);
 }
-body.theme-classic :is(.theme-menu, .session-description-panel, .session-action-menu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
+body.theme-classic :is(.theme-menu, .session-description-panel, .session-action-menu, .session-action-submenu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
   border-style: solid;
   border-radius: 9px;
   box-shadow: var(--shadow);
 }
-body.theme-geek :is(.theme-menu, .session-description-panel, .session-action-menu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
+body.theme-geek :is(.theme-menu, .session-description-panel, .session-action-menu, .session-action-submenu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
   border-style: dashed;
   border-radius: 2px;
   box-shadow: none;
 }
-body.theme-aurora :is(.theme-menu, .session-description-panel, .session-action-menu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
+body.theme-aurora :is(.theme-menu, .session-description-panel, .session-action-menu, .session-action-submenu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
   border-style: solid;
   border-radius: 11px;
   background: color-mix(in srgb, var(--surface-raised) 86%, transparent);
   box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 18%, transparent);
   backdrop-filter: blur(18px);
 }
-body.theme-newspaper :is(.theme-menu, .session-description-panel, .session-action-menu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
+body.theme-newspaper :is(.theme-menu, .session-description-panel, .session-action-menu, .session-action-submenu, .session-note-menu, .color-picker, .recent-dir-list, .modal, .toast) {
   border: 3px double var(--line-strong);
   border-radius: 0;
   box-shadow: none;
@@ -1949,6 +2045,15 @@ body.theme-aurora .session-header { background: color-mix(in srgb, var(--surface
 body.theme-aurora .session-child-session.active { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 18%, var(--surface-raised)), color-mix(in srgb, var(--teal) 10%, var(--surface-raised))); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 14%, transparent); }
 body.theme-aurora .session-bottom-bar { background: color-mix(in srgb, var(--surface) 90%, transparent); border-top-color: color-mix(in srgb, var(--accent) 30%, var(--line)); --note-mask-surface: var(--surface); backdrop-filter: blur(14px); }
 body.theme-aurora .theme-menu, body.theme-aurora .session-description-panel { border-radius: 13px; background: color-mix(in srgb, var(--surface-raised) 86%, transparent); box-shadow: 0 16px 36px color-mix(in srgb, var(--accent) 18%, transparent); backdrop-filter: blur(18px); }
+/* 会话操作与任务/会话切换同属选择菜单；极光主题中保持相同的不透明材质。 */
+body.theme-aurora .session-action-menu,
+body.theme-aurora .session-action-submenu {
+  border-color: var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  backdrop-filter: none;
+}
 body.theme-aurora .note-button { border-radius: 9px; }
 
 /* 工作日报：赤陶色报头、双线规则和纸面留白；色彩只做栏目索引。 */
@@ -1984,6 +2089,8 @@ body.theme-newspaper.theme-dark {
 body.theme-newspaper #workspace-main { background: var(--bg); background-image: repeating-linear-gradient(0deg, color-mix(in srgb, var(--line-strong) 10%, transparent) 0 1px, transparent 1px 30px); }
 body.theme-newspaper .topbar { background: var(--surface); border-bottom: 0; backdrop-filter: none; }
 body.theme-newspaper .brand-mark { width: 30px; height: 30px; border: 2px solid var(--accent); border-radius: 50%; background: transparent; color: var(--accent); box-shadow: none; }
+/* 报刊主题的左上角品牌图标改用方形外框，与报刊排版风格一致；左下角本就为方形，保持原样。 */
+body.theme-newspaper #workbench-layout > .topbar-brand .brand-mark { border-radius: 0; }
 body.theme-newspaper #task-toolbar { background: var(--surface); border-bottom: 3px double var(--line-strong); }
 body.theme-newspaper .toolbar-controls, body.theme-newspaper .board-filter-tabs { border-radius: 0; background: var(--surface); box-shadow: none; }
 body.theme-newspaper .sidebar-nav-item.active { border-color: var(--line-strong); background: var(--accent-soft); color: var(--accent-strong); }
@@ -2198,7 +2305,8 @@ body.session-mode #workbench-layout > .topbar > .session-header { display: flex;
   grid-column: 1;
   grid-row: 3;
   position: relative;
-  z-index: 6;
+  /* 搜索/排序浮层需要越过工作区的连续分割线。 */
+  z-index: 21;
   width: auto;
   height: 42px;
   min-width: 0;
@@ -2232,7 +2340,7 @@ body.session-mode #workbench-layout > .topbar > .session-header { display: flex;
 }
 body.session-mode .session-main,
 body:not(.session-mode) #workspace-main { padding-bottom: 0; }
-#workbench-layout:has(#theme-menu:not(.hidden)) > .topbar-brand { z-index: 25; }
+#workbench-layout:has(#display-settings-menu:not(.hidden)) > .topbar-brand { z-index: 25; }
 body.sidebar-collapsed #workbench-layout {
   grid-template-columns: 0 minmax(0, 1fr);
 }
@@ -2393,7 +2501,7 @@ html, body { height: 100%; }
 .task-groups { margin-top: 10px; padding-top: 8px; }
 
 /* 侧栏外层不参与滚动：内部列表独占剩余高度，并常驻细滚动条。 */
-#session-sidebar { padding-right: 0; }
+#session-sidebar { padding-right: 7px; }
 #app-sidebar :is(.task-groups, #session-tree) {
   scrollbar-gutter: auto;
   scrollbar-width: thin;
@@ -2524,6 +2632,335 @@ body.session-mode .session-main { padding-bottom: 0; }
 #workbench-layout > .topbar > .session-header .terminal-search {
   gap: 5px;
 }
+/* 终端顶部栏必须占满右侧工作区；否则 flex 基础宽度会按内容收缩，搜索框右侧留下大片空白。 */
+body.session-mode #workbench-layout > .topbar > .session-header {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+/* 终端标题拆成任务与子会话两个可切换按钮，统一采用 28px 控件高度。 */
+.session-title-switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: min(34vw, 360px);
+}
+.session-title-switcher .session-title-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+}
+.session-title-switcher .session-title-button::after {
+  display: none;
+  content: none;
+}
+.session-title-switcher .session-title-button:hover:not(:disabled),
+.session-title-switcher .session-title-button:focus-visible,
+.session-title-switcher .session-title-button[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.session-title-switcher .session-title-button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+.session-title-switcher .session-task-name { max-width: min(30vw, 260px); }
+.session-title-switcher .session-name-title { max-width: min(34vw, 360px); font-weight: 500; }
+.session-switch-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  width: max-content;
+  min-width: 190px;
+  max-width: min(360px, calc(100vw - 40px));
+  max-height: min(360px, calc(100vh - 90px));
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+.session-switch-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 6px 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-switch-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-switch-option-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.session-switch-meta-text { white-space: nowrap; }
+/* 菜单状态直接沿用任务/会话卡片标题前的图标尺寸、颜色与运行光效。 */
+.session-switch-option-meta .card-status-icon {
+  flex: 0 0 1.15em;
+  margin-right: .35em;
+  font: 700 .95em/1 "SFMono-Regular", Consolas, monospace;
+}
+.session-switch-option-meta .session-card-state {
+  flex: 0 0 15px;
+  font-size: 14px;
+}
+.session-switch-option:hover,
+.session-switch-option:focus-visible,
+.session-switch-option.active { background: var(--accent-soft); color: var(--accent-strong); outline: none; }
+.session-switch-empty { padding: 8px 9px; color: var(--muted); font-size: 11px; }
+/* 终端顶部栏与任务/便签/会话/回收站顶部工具栏采用同一套两区布局。 */
+body.session-mode #workbench-layout > .topbar > .session-header {
+  gap: 8px;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-context {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-context-copy {
+  width: auto;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-toolbar-intro {
+  gap: 5px;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher {
+  max-width: min(34vw, 360px);
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button {
+  height: 28px;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-color: transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button:hover:not(:disabled),
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button:focus-visible {
+  border-color: transparent;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-weight: 600;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button[aria-expanded="true"],
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button[aria-expanded="true"]:hover,
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button[aria-expanded="true"]:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-title-separator {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-file-copy {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  margin-left: 0;
+  border-color: transparent;
+  border-radius: 5px;
+  background: transparent;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-file-copy:hover:not(:disabled),
+body.session-mode #workbench-layout > .topbar > .session-header .session-file-copy:focus-visible {
+  border-color: transparent;
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-file-copy[aria-expanded="true"],
+body.session-mode #workbench-layout > .topbar > .session-header .session-file-copy[aria-expanded="true"]:hover:not(:disabled),
+body.session-mode #workbench-layout > .topbar > .session-header .session-file-copy[aria-expanded="true"]:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .session-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search { gap: 8px; }
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search input {
+  min-width: 120px;
+  height: 28px;
+  padding: 0 10px 0 29px;
+  border-radius: 0;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button {
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 3px;
+  border-radius: 6px;
+}
+/* 搜索方向按钮沿用看板右侧工具按钮的悬浮、聚焦和选中反馈。
+   这里必须使用同等层级的选择器，才能覆盖主题对默认背景的限定。 */
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button:hover,
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button:focus-visible {
+  border-color: transparent;
+  background: var(--surface-muted);
+  color: var(--accent-strong);
+}
+body.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button.active {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+body.theme-classic.session-mode #workbench-layout > .topbar > .session-header .session-title-row,
+body.theme-classic.session-mode #workbench-layout > .topbar > .session-header .terminal-search input,
+body.theme-classic.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools,
+body.theme-classic.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button { border-radius: 7px; }
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header .session-title-row,
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header .terminal-search input,
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools,
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button { border-radius: 1px; border-style: dashed; }
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header .session-title-switcher .session-title-button,
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header .session-file-copy { border-style: dashed; }
+body.theme-aurora.session-mode #workbench-layout > .topbar > .session-header .session-title-row {
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+body.theme-aurora.session-mode #workbench-layout > .topbar > .session-header .terminal-search input {
+  border-color: var(--line);
+  border-radius: 0;
+  background: var(--surface-raised);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+body.theme-aurora.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools {
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+body.theme-aurora.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button {
+  border-color: var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+body.theme-newspaper.session-mode #workbench-layout > .topbar > .session-header .session-title-row,
+body.theme-newspaper.session-mode #workbench-layout > .topbar > .session-header .terminal-search input,
+body.theme-newspaper.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools,
+body.theme-newspaper.session-mode #workbench-layout > .topbar > .session-header .terminal-search-tools > .workspace-module-button { border-radius: 0; background: var(--surface-raised); }
+/* 终端顶部栏与同主题看板顶部栏共享背景层，令两个共享控件区可清晰区分。 */
+body.theme-classic.session-mode #workbench-layout > .topbar > .session-header {
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+body.theme-geek.session-mode #workbench-layout > .topbar > .session-header { background: var(--surface); }
+body.theme-aurora.session-mode #workbench-layout > .topbar > .session-header {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(18px);
+}
+body.theme-newspaper.session-mode #workbench-layout > .topbar > .session-header {
+  background: var(--surface);
+  backdrop-filter: none;
+}
 /* 底部便签停靠在右端：提醒流在其左侧渐隐，详情面板向左展开。 */
 #workbench-layout > .session-bottom-bar .session-note-buttons {
   margin-left: auto;
@@ -2649,6 +3086,18 @@ body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench
 @media (max-width: 760px) {
   #workbench-layout > .topbar-brand,
   #workbench-layout > .bottom-bar-controls > .sidebar-header { gap: 3px; }
+  .display-settings-menu { left: 4px; width: min(142px, calc(100vw - 20px)); }
+  .display-settings-submenu { left: 0; top: calc(100% + 3px); width: min(192px, calc(100vw - 20px)); }
   .session-tree-tool-panel { left: 7px; right: 7px; width: auto; }
   .session-tree-sort-menu { width: auto; }
 }
+
+/* 显示设置沿用四种界面主题的浮层语言。 */
+body.theme-classic .display-settings-menu,
+body.theme-classic .display-settings-submenu { border-radius: 9px; box-shadow: var(--shadow); }
+body.theme-geek .display-settings-menu,
+body.theme-geek .display-settings-submenu { border-style: dashed; border-radius: 1px; box-shadow: none; }
+body.theme-aurora .display-settings-menu,
+body.theme-aurora .display-settings-submenu { border-radius: 13px; background: color-mix(in srgb, var(--surface-raised) 86%, transparent); box-shadow: 0 16px 36px color-mix(in srgb, var(--accent) 18%, transparent); backdrop-filter: blur(18px); }
+body.theme-newspaper .display-settings-menu,
+body.theme-newspaper .display-settings-submenu { border: 3px double var(--line-strong); border-radius: 0; box-shadow: none; }

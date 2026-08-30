@@ -83,10 +83,14 @@ function taskSessions(task) {
   }
   return task.sessions;
 }
+function activeTaskSessions(task) {
+  return taskSessions(task).filter((session) => session.status !== 'archived');
+}
 function resolveTaskSession(task, sessionId) {
-  const sessions = taskSessions(task);
-  const id = sessionId || activeSessionIds.get(task.id) || sessions[0]?.id;
-  return sessions.find((session) => session.id === id) || sessions[0] || null;
+  if (sessionId) return taskSessions(task).find((session) => session.id === sessionId) || null;
+  const sessions = activeTaskSessions(task);
+  const activeSessionId = activeSessionIds.get(task.id);
+  return sessions.find((session) => session.id === activeSessionId) || sessions[0] || null;
 }
 function sessionTitleFromPrompt(text) {
   const title = String(text || '').replace(/\s+/g, ' ').trim();
@@ -117,16 +121,36 @@ function initializeSessionReadState() {
 }
 function publicSession(child) {
   let shown = child;
+  const parsed = parseSessionFile(child.sessionFile);
   if (!child.title || child.title === '新会话') {
-    for (const entry of parseSessionFile(child.sessionFile).entries) {
+    for (const entry of parsed.entries) {
       if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
       const text = extractText(entry.message.content).trim();
       if (text) { shown = { ...child, title: sessionTitleFromPrompt(text) }; break; }
     }
   }
-  const messages = assistantMessages(child);
+  const messages = unreadAssistantMessages(parsed.entries);
+  const parsedStats = parsed.stats;
   const { lastReadMessageId, lastReadAt, ...safe } = shown;
-  return { ...safe, latestMessageId: messages.at(-1)?.id || null, unreadCount: sessionUnreadCount(child, messages) };
+  return {
+    ...safe,
+    status: child.status === 'archived' ? 'archived' : 'active',
+    favorite: Boolean(child.favorite),
+    restorableWithTask: Boolean(child.restorableWithTask),
+    stats: parsedStats ? {
+      messages: Number(parsedStats.messages) || 0,
+      user: Number(parsedStats.user) || 0,
+      assistant: Number(parsedStats.assistant) || 0,
+      toolResults: Number(parsedStats.toolResults) || 0,
+      input: Number(parsedStats.input) || 0,
+      output: Number(parsedStats.output) || 0,
+      cacheRead: Number(parsedStats.cacheRead) || 0,
+      cacheWrite: Number(parsedStats.cacheWrite) || 0,
+      errors: Number(parsedStats.errors) || 0,
+    } : null,
+    latestMessageId: messages.at(-1)?.id || null,
+    unreadCount: sessionUnreadCount(child, messages),
+  };
 }
 function persistSessionTitle(task, child) {
   if (!child || (child.title && child.title !== '新会话')) return;
@@ -139,13 +163,14 @@ function persistSessionTitle(task, child) {
 function publicTask(task) {
   const internalStatus = task.status;
   const displayStatus = ['unfinished', 'done', 'archived'].includes(internalStatus) ? internalStatus : 'unfinished';
-  const allSessions = taskSessions(task);
-  const visibleSessions = allSessions;
+  const sessions = taskSessions(task);
+  const activeSessions = activeTaskSessions(task);
+  const storedActiveSessionId = activeSessionIds.get(task.id);
   return {
     ...task,
     status: displayStatus,
-    sessions: visibleSessions.map((session) => ({ ...publicSession(session), running: isWebTuiRunning(task.id, session.id) })),
-    activeSessionId: activeSessionIds.get(task.id) || visibleSessions[0]?.id || null,
+    sessions: sessions.map((session) => ({ ...publicSession(session), running: isWebTuiRunning(task.id, session.id) })),
+    activeSessionId: activeSessions.some((session) => session.id === storedActiveSessionId) ? storedActiveSessionId : activeSessions[0]?.id || null,
     overdue: Boolean(task.deadline && !['done', 'archived'].includes(internalStatus) && new Date(task.deadline).getTime() < Date.now()),
     piRunning: isWebTuiRunning(task.id),
   };
@@ -257,17 +282,34 @@ app.delete('/api/notes/:id/permanent', (req, res) => {
 });
 
 app.delete('/api/archived', async (req, res) => {
-  const type = ['all', 'tasks', 'notes'].includes(req.body?.type) ? req.body.type : 'all';
-  const archivedTasks = type === 'notes' ? [] : listTasks().filter((task) => task.status === 'archived');
+  const type = ['all', 'tasks', 'notes', 'sessions'].includes(req.body?.type) ? req.body.type : 'all';
+  const archivedTasks = ['notes', 'sessions'].includes(type) ? [] : listTasks().filter((task) => task.status === 'archived');
   for (const task of archivedTasks) {
     await stopTaskTui(task.id, { silent: true });
     removeTaskFiles(task);
     activeSessionIds.delete(task.id);
     deleteTask(task.id);
   }
-  const archivedNotes = type === 'tasks' ? [] : listNotes().filter((note) => note.status === 'archived');
+  const archivedNotes = ['tasks', 'sessions'].includes(type) ? [] : listNotes().filter((note) => note.status === 'archived');
   for (const note of archivedNotes) deleteNote(note.id);
-  res.json({ removed: archivedTasks.length + archivedNotes.length });
+  let archivedSessions = 0;
+  if (type === 'all' || type === 'sessions') {
+    for (const task of listTasks()) {
+      const sessions = taskSessions(task);
+      const removed = sessions.filter((session) => session.status === 'archived');
+      if (!removed.length) continue;
+      for (const session of removed) {
+        await stopTaskTui(task.id, { silent: true, sessionId: session.id });
+        try { if (existsSync(session.sessionFile)) unlinkSync(session.sessionFile); } catch { /* ignore */ }
+      }
+      const kept = sessions.filter((session) => session.status !== 'archived');
+      const patch = { sessions: kept, sessionFile: kept.find((session) => session.sessionFile === task.sessionFile)?.sessionFile || kept[0]?.sessionFile || null };
+      if (!kept.some((session) => session.id === activeSessionIds.get(task.id))) activeSessionIds.set(task.id, kept[0]?.id);
+      updateTask(task.id, patch);
+      archivedSessions += removed.length;
+    }
+  }
+  res.json({ removed: archivedTasks.length + archivedNotes.length + archivedSessions });
 });
 
 // 会话栏中的便签始终以当前会话为上下文，不保存任务或子会话关联。
@@ -357,10 +399,18 @@ app.delete('/api/tasks/:id', async (req, res) => {
   await stopTaskTui(task.id, { silent: true });
   for (const child of taskSessions(task)) killPi(child.sessionFile);
   activeSessionIds.delete(task.id);
+  for (const child of taskSessions(task)) {
+    if (child.status !== 'archived') {
+      child.status = 'archived';
+      child.archivedAt = nowIso();
+      child.restorableWithTask = true;
+      child.updatedAt = child.archivedAt;
+    }
+  }
   const archivedAt = nowIso();
   const validStatuses = ['unfinished', 'done'];
   const archivedFromStatus = validStatuses.includes(task.status) ? task.status : (validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'unfinished');
-  res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedFromStatus, archivedAt })) });
+  res.json({ task: publicTask(updateTask(task.id, { status: 'archived', archivedFromStatus, archivedAt, sessions: taskSessions(task) })) });
 });
 app.post('/api/tasks/:id/restore', (req, res) => {
   const task = getTask(req.params.id);
@@ -368,7 +418,15 @@ app.post('/api/tasks/:id/restore', (req, res) => {
   if (task.status !== 'archived') return res.status(409).json({ error: '只有废弃任务可以恢复' });
   const validStatuses = ['unfinished', 'done'];
   const restoredStatus = validStatuses.includes(task.archivedFromStatus) ? task.archivedFromStatus : 'unfinished';
-  res.json({ task: publicTask(updateTask(task.id, { status: restoredStatus, archivedFromStatus: null, archivedAt: null })) });
+  for (const child of taskSessions(task)) {
+    if (child.status === 'archived' && child.restorableWithTask) {
+      child.status = 'active';
+      child.archivedAt = null;
+      child.restorableWithTask = false;
+      child.updatedAt = nowIso();
+    }
+  }
+  res.json({ task: publicTask(updateTask(task.id, { status: restoredStatus, archivedFromStatus: null, archivedAt: null, sessions: taskSessions(task) })) });
 });
 app.delete('/api/tasks/:id/permanent', async (req, res) => {
   const task = getTask(req.params.id);
@@ -410,13 +468,14 @@ app.post('/api/tasks/:id/sessions/:sessionId/read', (req, res) => {
 app.get('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  const sessions = taskSessions(task);
+  const sessions = activeTaskSessions(task);
   res.json({ sessions: sessions.map(publicSession), activeSessionId: activeSessionIds.get(task.id) || sessions[0]?.id || null });
 });
 app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), createdAt: nowIso(), updatedAt: nowIso() };
+  if (task.status === 'archived') return res.status(409).json({ error: '废弃任务不能新建会话' });
+  const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), status: 'active', archivedAt: null, favorite: false, restorableWithTask: false, createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);
   const patch = { sessions };
@@ -430,9 +489,14 @@ app.patch('/api/tasks/:id/sessions/:sessionId', (req, res) => {
   if (!task) return res.status(404).json({ error: '任务不存在' });
   const session = taskSessions(task).find((item) => item.id === req.params.sessionId);
   if (!session) return res.status(404).json({ error: '子会话不存在' });
-  const title = String(req.body?.title || '').trim();
-  if (!title) return res.status(400).json({ error: '会话名称不能为空' });
-  session.title = title.slice(0, 80); session.updatedAt = nowIso();
+  if (session.status === 'archived') return res.status(409).json({ error: '废弃会话不能编辑' });
+  if (Object.hasOwn(req.body || {}, 'favorite')) session.favorite = Boolean(req.body.favorite);
+  if (Object.hasOwn(req.body || {}, 'title')) {
+    const title = String(req.body?.title || '').trim();
+    if (!title) return res.status(400).json({ error: '会话名称不能为空' });
+    session.title = title.slice(0, 80);
+  }
+  session.updatedAt = nowIso();
   updateTask(task.id, { sessions: taskSessions(task) });
   res.json({ session: publicSession(session), task: publicTask(getTask(task.id)) });
 });
@@ -440,20 +504,60 @@ app.delete('/api/tasks/:id/sessions/:sessionId', async (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   const sessions = taskSessions(task);
+  const removed = sessions.find((item) => item.id === req.params.sessionId);
+  if (!removed) return res.status(404).json({ error: '子会话不存在' });
+  if (removed.status === 'archived') return res.status(409).json({ error: '会话已在回收站中' });
+  if (isWebTuiRunning(task.id, removed.id)) await stopTaskTui(task.id, { silent: true, sessionId: removed.id });
+  const emptySession = (parseSessionFile(removed.sessionFile).stats?.messages || 0) === 0;
+  if (emptySession) {
+    sessions.splice(sessions.indexOf(removed), 1);
+    try { if (existsSync(removed.sessionFile)) unlinkSync(removed.sessionFile); } catch { /* ignore */ }
+    const active = activeTaskSessions(task);
+    if (!active.length) activeSessionIds.delete(task.id);
+    else if (activeSessionIds.get(task.id) === removed.id) activeSessionIds.set(task.id, active[0].id);
+    updateTask(task.id, { sessions, sessionFile: active.find((session) => session.sessionFile === task.sessionFile)?.sessionFile || active[0]?.sessionFile || null });
+    return res.json({ ok: true, permanentlyDeleted: true, task: publicTask(getTask(task.id)) });
+  }
+  removed.status = 'archived';
+  removed.archivedAt = nowIso();
+  removed.restorableWithTask = false;
+  removed.updatedAt = nowIso();
+  const active = activeTaskSessions(task);
+  const patch = { sessions, sessionFile: active.find((session) => session.sessionFile === task.sessionFile)?.sessionFile || active[0]?.sessionFile || null };
+  if (!active.length) activeSessionIds.delete(task.id);
+  else if (activeSessionIds.get(task.id) === removed.id) activeSessionIds.set(task.id, active[0].id);
+  updateTask(task.id, patch);
+  res.json({ ok: true, task: publicTask(getTask(task.id)) });
+});
+app.post('/api/tasks/:id/sessions/:sessionId/restore', (req, res) => {
+  const task = getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  const session = taskSessions(task).find((item) => item.id === req.params.sessionId);
+  if (!session) return res.status(404).json({ error: '子会话不存在' });
+  if (session.status !== 'archived') return res.status(409).json({ error: '会话不在回收站中' });
+  if (task.status === 'archived') return res.status(409).json({ error: '请先恢复所属任务' });
+  session.status = 'active';
+  session.archivedAt = null;
+  session.restorableWithTask = false;
+  session.updatedAt = nowIso();
+  const sessions = taskSessions(task);
+  updateTask(task.id, { sessions, sessionFile: task.sessionFile || session.sessionFile });
+  res.json({ session: publicSession(session), task: publicTask(getTask(task.id)) });
+});
+app.delete('/api/tasks/:id/sessions/:sessionId/permanent', async (req, res) => {
+  const task = getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  const sessions = taskSessions(task);
   const index = sessions.findIndex((item) => item.id === req.params.sessionId);
   if (index < 0) return res.status(404).json({ error: '子会话不存在' });
-  const [removed] = sessions.splice(index, 1);
-  if (isWebTuiRunning(task.id, removed.id)) await stopTaskTui(task.id, { silent: true, sessionId: removed.id });
-  try { if (existsSync(removed.sessionFile)) unlinkSync(removed.sessionFile); } catch { /* ignore */ }
-  const patch = { sessions };
-  if (!sessions.length) {
-    patch.sessionFile = null;
-    activeSessionIds.delete(task.id);
-  } else {
-    if (task.sessionFile === removed.sessionFile) patch.sessionFile = sessions[0].sessionFile;
-    if (activeSessionIds.get(task.id) === removed.id) activeSessionIds.set(task.id, sessions[0].id);
-  }
-  updateTask(task.id, patch);
+  const session = sessions[index];
+  if (session.status !== 'archived') return res.status(409).json({ error: '只有回收站中的会话可以永久删除' });
+  sessions.splice(index, 1);
+  await stopTaskTui(task.id, { silent: true, sessionId: session.id });
+  try { if (existsSync(session.sessionFile)) unlinkSync(session.sessionFile); } catch { /* ignore */ }
+  const active = activeTaskSessions(task);
+  if (!active.some((item) => item.id === activeSessionIds.get(task.id))) activeSessionIds.set(task.id, active[0]?.id);
+  updateTask(task.id, { sessions, sessionFile: active.find((item) => item.sessionFile === task.sessionFile)?.sessionFile || active[0]?.sessionFile || null });
   res.json({ ok: true, task: publicTask(getTask(task.id)) });
 });
 app.post('/api/tasks/:id/tui/restart', async (req, res) => {

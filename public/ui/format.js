@@ -30,6 +30,18 @@ export function number(value) {
   return numberFormatter.format(Number(value) || 0);
 }
 
+/** 面向卡片摘要的紧凑数量格式：1000+ 使用 k，1000000+ 使用 m。 */
+export function compactNumber(value) {
+  const numeric = Number(value) || 0;
+  const absolute = Math.abs(numeric);
+  if (absolute < 1000) return number(numeric);
+  const roundsToMillions = Math.abs(Number((numeric / 1000).toFixed(1))) >= 1000;
+  const useMillions = absolute >= 1000000 || roundsToMillions;
+  const divisor = useMillions ? 1000000 : 1000;
+  const suffix = useMillions ? 'm' : 'k';
+  return `${(numeric / divisor).toFixed(1).replace(/\.0$/, '')}${suffix}`;
+}
+
 export function cost(value) {
   return costFormatter.format(Number(value) || 0);
 }

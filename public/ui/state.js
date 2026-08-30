@@ -22,9 +22,11 @@ const LEGACY_COLOR = { high: 'red', medium: 'yellow', low: 'blue' };
 
 const NOTE_FILTER_KEYS = ['all', 'normal', 'topbar', 'session'];
 const NOTE_VIEW_SETTING_KEYS = NOTE_FILTER_KEYS.map((key) => `notes:${key}`);
-const ARCHIVE_TYPE_KEYS = ['all', 'tasks', 'notes'];
+const SESSION_FILTER_KEYS = ['all', 'favorite', 'running', 'stopped'];
+const SESSION_VIEW_SETTING_KEYS = SESSION_FILTER_KEYS.map((key) => `sessions:${key}`);
+const ARCHIVE_TYPE_KEYS = ['all', 'tasks', 'notes', 'sessions'];
 const ARCHIVE_VIEW_SETTING_KEYS = ARCHIVE_TYPE_KEYS.map((key) => `archive:${key}`);
-const VIEW_SETTING_KEYS = ['', ...Object.keys(STATUS), ...NOTE_VIEW_SETTING_KEYS, ...ARCHIVE_VIEW_SETTING_KEYS];
+const VIEW_SETTING_KEYS = ['', ...Object.keys(STATUS), ...NOTE_VIEW_SETTING_KEYS, ...SESSION_VIEW_SETTING_KEYS, ...ARCHIVE_VIEW_SETTING_KEYS];
 const DEFAULT_VIEW_SETTINGS = { sort: 'updated', boardGroup: 'single', boardCardLayout: 'single' };
 function normalizeViewStatus(value) {
   if (value === 'todo' || value === 'running' || value === 'unfinished') return 'unfinished';
@@ -33,6 +35,7 @@ function normalizeViewStatus(value) {
 function normalizeViewSettingsKey(value) {
   const key = String(value || '');
   if (key.startsWith('notes:')) return NOTE_VIEW_SETTING_KEYS.includes(key) ? key : null;
+  if (key.startsWith('sessions:')) return SESSION_VIEW_SETTING_KEYS.includes(key) ? key : null;
   if (key.startsWith('archive:')) return ARCHIVE_VIEW_SETTING_KEYS.includes(key) ? key : null;
   if (key === '') return '';
   const normalized = normalizeViewStatus(key);
@@ -40,15 +43,17 @@ function normalizeViewSettingsKey(value) {
 }
 function currentViewSettingsKey(status = state.status) {
   if (status === 'archived') return `archive:${state.archiveType}`;
-  return state.boardType === 'notes' ? `notes:${state.noteFilter}` : status;
+  if (state.boardType === 'notes') return `notes:${state.noteFilter}`;
+  if (state.boardType === 'sessions') return `sessions:${state.sessionFilter}`;
+  return status;
 }
 
 export const state = {
-  tasks: [], notes: [], boardType: 'tasks', archiveType: 'all', noteFilter: 'all', status: '',
+  tasks: [], notes: [], boardType: 'tasks', archiveType: 'all', noteFilter: 'all', sessionFilter: 'all', status: '',
   boardGroup: 'single', boardCardLayout: 'single', sort: 'updated', search: '', signature: '',
   viewSettings: Object.fromEntries(VIEW_SETTING_KEYS.map((key) => [key, { ...DEFAULT_VIEW_SETTINGS }])),
   module: 'tasks', sidebarCollapsed: false, sessionTask: null, sessionSessionId: null,
-  collapsedSessionTasks: new Set(), sessionTaskIds: new Set(), hiddenCompletedSessionTasks: new Set(),
+  collapsedSessionTasks: new Set(), collapsedSessionPaths: new Set(), sessionTreeGroupMode: 'task', sessionTaskIds: new Set(), hiddenCompletedSessionTasks: new Set(),
 };
 
 export function applyViewSettings(status = state.status) {
@@ -102,9 +107,10 @@ export function loadLayoutState() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || '{}') || {}; } catch { /* ignore malformed browser data */ }
   if (saved.module === 'tasks' || saved.module === 'session') state.module = saved.module;
-  if (saved.boardType === 'notes' || saved.boardType === 'tasks') state.boardType = saved.boardType;
-  if (['all', 'tasks', 'notes'].includes(saved.archiveType)) state.archiveType = saved.archiveType;
-  if (['all', 'normal', 'topbar', 'session'].includes(saved.noteFilter)) state.noteFilter = saved.noteFilter;
+  if (['notes', 'tasks', 'sessions'].includes(saved.boardType)) state.boardType = saved.boardType;
+  if (ARCHIVE_TYPE_KEYS.includes(saved.archiveType)) state.archiveType = saved.archiveType;
+  if (NOTE_FILTER_KEYS.includes(saved.noteFilter)) state.noteFilter = saved.noteFilter;
+  if (SESSION_FILTER_KEYS.includes(saved.sessionFilter)) state.sessionFilter = saved.sessionFilter;
   const savedStatus = normalizeViewStatus(saved.status);
   if (VIEW_SETTING_KEYS.includes(savedStatus)) state.status = savedStatus;
 
@@ -114,7 +120,7 @@ export function loadLayoutState() {
   if (['single', 'compact'].includes(saved.boardCardLayout)) legacy.boardCardLayout = saved.boardCardLayout;
   if (['updated', 'created', 'deadline'].includes(saved.sort)) legacy.sort = saved.sort;
   if (Object.keys(legacy).length) {
-    const legacyTargets = ['', ...(state.status ? [state.status] : []), ...NOTE_VIEW_SETTING_KEYS, ...ARCHIVE_VIEW_SETTING_KEYS];
+    const legacyTargets = ['', ...(state.status ? [state.status] : []), ...NOTE_VIEW_SETTING_KEYS, ...SESSION_VIEW_SETTING_KEYS, ...ARCHIVE_VIEW_SETTING_KEYS];
     legacyTargets.forEach((key) => { state.viewSettings[key] = { ...state.viewSettings[key], ...legacy }; });
   }
   if (saved.viewSettings && typeof saved.viewSettings === 'object') {
@@ -136,6 +142,8 @@ export function loadLayoutState() {
   if (typeof saved.sessionTask === 'string' && saved.sessionTask) state.sessionTask = saved.sessionTask;
   if (typeof saved.sessionSessionId === 'string' && saved.sessionSessionId) state.sessionSessionId = saved.sessionSessionId;
   if (Array.isArray(saved.collapsedSessionTasks)) state.collapsedSessionTasks = new Set(saved.collapsedSessionTasks.filter((id) => typeof id === 'string'));
+  if (Array.isArray(saved.collapsedSessionPaths)) state.collapsedSessionPaths = new Set(saved.collapsedSessionPaths.filter((path) => typeof path === 'string'));
+  if (saved.sessionTreeGroupMode === 'path' || saved.sessionTreeGroupMode === 'task') state.sessionTreeGroupMode = saved.sessionTreeGroupMode;
   if (Array.isArray(saved.sessionTaskIds)) state.sessionTaskIds = new Set(saved.sessionTaskIds.filter((id) => typeof id === 'string'));
   if (Array.isArray(saved.hiddenCompletedSessionTasks)) state.hiddenCompletedSessionTasks = new Set(saved.hiddenCompletedSessionTasks.filter((id) => typeof id === 'string'));
 }
@@ -143,12 +151,13 @@ export function loadLayoutState() {
 export function saveLayoutState() {
   try {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
-      module: state.module, boardType: state.boardType, archiveType: state.archiveType, noteFilter: state.noteFilter, status: state.status, viewSettings: state.viewSettings,
+      module: state.module, boardType: state.boardType, archiveType: state.archiveType, noteFilter: state.noteFilter, sessionFilter: state.sessionFilter, status: state.status, viewSettings: state.viewSettings,
       // 保留当前值，便于旧版本工作台继续读取布局状态。
       boardGroup: state.boardGroup, boardCardLayout: state.boardCardLayout, sort: state.sort,
       search: state.search, sidebarCollapsed: state.sidebarCollapsed, sessionTask: state.sessionTask,
       sessionSessionId: state.sessionSessionId,
-      collapsedSessionTasks: [...state.collapsedSessionTasks], sessionTaskIds: [...state.sessionTaskIds], hiddenCompletedSessionTasks: [...state.hiddenCompletedSessionTasks],
+      collapsedSessionTasks: [...state.collapsedSessionTasks], collapsedSessionPaths: [...state.collapsedSessionPaths], sessionTreeGroupMode: state.sessionTreeGroupMode,
+      sessionTaskIds: [...state.sessionTaskIds], hiddenCompletedSessionTasks: [...state.hiddenCompletedSessionTasks],
     }));
   } catch { /* ignore unavailable browser storage */ }
 }

@@ -1,4 +1,4 @@
-import { deadline, esc, number, time } from './ui/format.js';
+import { compactNumber, deadline, esc, number, time } from './ui/format.js';
 import { api } from './ui/api.js';
 import {
   COLORS, MAX_CUSTOM_COLORS, STATUS, colorCatalog, customColors, saveCustomColors, state, taskColor,
@@ -59,6 +59,7 @@ let tuiOpening = null;
 let modalRestoreFocus = null;
 let sessionTaskDetailsOpen = false;
 let sessionActionMenuOpen = false;
+let sessionSwitchMenuOpen = null;
 let marqueeMotionFrame = null;
 let marqueeMotion = null;
 let renderedPinnedNotesSignature = '';
@@ -79,6 +80,7 @@ let sessionTreeSort = SESSION_TREE_SORT_VALUES.has(localStorage.getItem('workben
   : 'updated';
 let sessionTreeSearchOpen = false;
 let sessionTreeSortOpen = false;
+let sessionTreeGroupOpen = false;
 let noteDragTimer = null;
 let noteDrag = null;
 let suppressNoteClickUntil = 0;
@@ -109,10 +111,16 @@ function forgetWorkingDir(value) {
   localStorage.setItem('workbench-working-dirs', JSON.stringify(saved.filter((item) => item !== dir)));
   localStorage.setItem('workbench-hidden-working-dirs', JSON.stringify([dir, ...hiddenWorkingDirs().filter((item) => item !== dir)].slice(0, 50)));
 }
-function syncThemeMenu() {
+function syncDisplaySettings() {
   const style = localStorage.getItem('workbench-style') || 'classic';
   document.querySelectorAll('[data-theme-style]').forEach((button) => {
     const active = button.dataset.themeStyle === style;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  });
+  const theme = ['system', 'light', 'dark'].includes(localStorage.getItem('workbench-theme')) ? localStorage.getItem('workbench-theme') : 'system';
+  document.querySelectorAll('[data-display-mode]').forEach((button) => {
+    const active = button.dataset.displayMode === theme;
     button.classList.toggle('active', active);
     button.setAttribute('aria-checked', String(active));
   });
@@ -125,7 +133,7 @@ function applyThemeStyle(style) {
   const selected = THEME_STYLES.includes(normalized) ? normalized : 'classic';
   THEME_BODY_CLASSES.forEach((name) => document.body.classList.toggle(`theme-${name}`, THEME_CLASS_NAMES[selected] === name));
   localStorage.setItem('workbench-style', selected);
-  syncThemeMenu();
+  syncDisplaySettings();
 }
 function applyTheme(theme) {
   const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -142,19 +150,7 @@ function applyTheme(theme) {
   const themeColor = themeColors[style][dark ? 'dark' : 'light'];
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
   localStorage.setItem('workbench-theme', theme);
-  const modeToggle = $('#mode-toggle');
-  if (modeToggle) {
-    const modeLabel = theme === 'system' ? '跟随系统' : theme === 'light' ? '亮色模式' : '暗色模式';
-    const modeIcon = theme === 'system'
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>'
-      : theme === 'light'
-        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></svg>'
-        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 14.5A7 7 0 0 1 9.5 5 7.5 7.5 0 1 0 19 14.5Z"/></svg>';
-    modeToggle.innerHTML = modeIcon;
-    modeToggle.title = `显示模式：${modeLabel}，点击切换`;
-    modeToggle.setAttribute('aria-label', `显示模式：${modeLabel}，点击切换`);
-  }
-  syncThemeMenu();
+  syncDisplaySettings();
 }
 function isTerminalDark() {
   // TUI 的配色必须跟随工作台当前的亮暗模式，不能只看浏览器默认主题。
@@ -187,12 +183,13 @@ function workspaceViewSnapshot() {
     status: state.status,
     archiveType: state.archiveType,
     noteFilter: state.noteFilter,
+    sessionFilter: state.sessionFilter,
     sessionTask: state.module === 'session' ? state.sessionTask : null,
     sessionSessionId: state.module === 'session' ? state.sessionSessionId : null,
   };
 }
 function sameWorkspaceView(a, b) {
-  return Boolean(a && b && ['module', 'boardType', 'status', 'archiveType', 'noteFilter', 'sessionTask', 'sessionSessionId'].every((key) => a[key] === b[key]));
+  return Boolean(a && b && ['module', 'boardType', 'status', 'archiveType', 'noteFilter', 'sessionFilter', 'sessionTask', 'sessionSessionId'].every((key) => a[key] === b[key]));
 }
 function syncWorkspaceHistoryControls() {
   const back = $('#workspace-back');
@@ -221,6 +218,7 @@ async function restoreWorkspaceView(snapshot) {
     state.status = snapshot.status;
     state.archiveType = snapshot.archiveType;
     state.noteFilter = snapshot.noteFilter;
+    state.sessionFilter = snapshot.sessionFilter || 'all';
     applyViewSettings();
     if (snapshot.module === 'session') {
       if (snapshot.sessionTask && currentTask(snapshot.sessionTask)) await selectSession(snapshot.sessionTask, snapshot.sessionSessionId, { record: false });
@@ -257,18 +255,21 @@ const BOARD_GROUP_ICONS = {
   path: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM3.5 7.5v-1a2 2 0 0 1 2-2h4l2 2h5"/></svg>',
   color: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16h1.5a2 2 0 0 0 0-4H12a1.5 1.5 0 0 1 0-3h3a5 5 0 0 0 5-5c0-2.2-3.6-4-8-4Z"/><circle cx="8" cy="9" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/></svg>',
   kind: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="13" height="14" rx="1.5"/><path d="M8 4h11a1 1 0 0 1 1 1v12"/></svg>',
+  task: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
   noteCategory: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="6" height="6" rx="1"/><rect x="14" y="5" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>',
 };
 const EMPTY_TRASH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5h6v2"/><path d="M7 8h10l-1 12H8L7 8Z"/><path d="m10 11 4 4m0-4-4 4"/></svg>';
 function syncTaskToolbarTitle() {
   const archived = state.status === 'archived';
   const notes = !archived && state.boardType === 'notes';
+  const sessions = !archived && state.boardType === 'sessions';
   const clearArchivedButton = $('#purge-archived');
   if (clearArchivedButton) {
     clearArchivedButton.innerHTML = EMPTY_TRASH_ICON;
     const archivedTaskCount = state.tasks.filter((task) => task.status === 'archived').length;
     const archivedNoteCount = state.notes.filter((note) => note.status === 'archived').length;
-    const archivedCounts = { all: archivedTaskCount + archivedNoteCount, tasks: archivedTaskCount, notes: archivedNoteCount };
+    const archivedSessionCount = state.tasks.flatMap((task) => task.sessions || []).filter((session) => session.status === 'archived').length;
+    const archivedCounts = { all: archivedTaskCount + archivedNoteCount + archivedSessionCount, tasks: archivedTaskCount, notes: archivedNoteCount, sessions: archivedSessionCount };
     clearArchivedButton.classList.toggle('hidden', !archived);
     clearArchivedButton.disabled = archivedCounts[state.archiveType] === 0;
   }
@@ -276,10 +277,11 @@ function syncTaskToolbarTitle() {
   let searchLabel = '搜索任务';
   if (archived) searchLabel = '搜索回收站';
   else if (notes) searchLabel = '搜索便签';
+  else if (sessions) searchLabel = '搜索会话';
   if (searchInput) searchInput.setAttribute('aria-label', searchLabel);
   const newItemButton = $('#toolbar-new-item');
   if (newItemButton) {
-    const label = notes ? '新建便签' : '新建任务';
+    const label = notes ? '新建便签' : sessions ? '新建会话' : '新建任务';
     newItemButton.classList.toggle('hidden', archived);
     newItemButton.title = label;
     newItemButton.setAttribute('aria-label', label);
@@ -343,24 +345,32 @@ function currentNote(id) { return state.notes.find((note) => note.id === id); }
 const LAST_OPENED_SESSION_KEY = 'workbench-last-opened-session';
 function rememberLastOpenedSession(taskId, sessionId) {
   if (!taskId || !sessionId) return;
-  try { localStorage.setItem(LAST_OPENED_SESSION_KEY, JSON.stringify({ taskId, sessionId })); } catch { /* ignore unavailable browser storage */ }
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAST_OPENED_SESSION_KEY) || '{}');
+    const sessions = saved && typeof saved === 'object' && saved.sessions && typeof saved.sessions === 'object' ? saved.sessions : {};
+    if (!saved.sessions && saved && typeof saved.taskId === 'string' && typeof saved.sessionId === 'string') sessions[saved.taskId] = saved.sessionId;
+    sessions[taskId] = sessionId;
+    localStorage.setItem(LAST_OPENED_SESSION_KEY, JSON.stringify({ taskId, sessionId, sessions }));
+  } catch { /* ignore unavailable browser storage */ }
 }
-function storedLastOpenedSession() {
+function storedLastOpenedSession(taskId = null) {
   try {
     const saved = JSON.parse(localStorage.getItem(LAST_OPENED_SESSION_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return null;
+    if (taskId && saved.sessions && typeof saved.sessions[taskId] === 'string') return { taskId, sessionId: saved.sessions[taskId] };
     if (saved && typeof saved.taskId === 'string' && typeof saved.sessionId === 'string') return saved;
   } catch { /* ignore malformed browser data */ }
   return null;
 }
-function findLastOpenedSession() {
-  const candidates = [
-    { taskId: state.sessionTask, sessionId: state.sessionSessionId },
-    storedLastOpenedSession(),
-  ];
-  return candidates.find((candidate) => {
-    const task = candidate && currentTask(candidate.taskId);
-    return task && availableSessions(task).some((session) => session.id === candidate.sessionId);
-  }) || null;
+function lastOpenedSessionForTask(task) {
+  if (!task) return null;
+  const sessions = availableSessions(task);
+  const stored = storedLastOpenedSession(task.id);
+  const remembered = stored && sessions.find((session) => session.id === stored.sessionId);
+  if (remembered) return remembered;
+  const active = sessions.find((session) => session.id === task.activeSessionId);
+  if (active) return active;
+  return sessions.slice().sort((a, b) => sessionTreeTime(b.updatedAt) - sessionTreeTime(a.updatedAt))[0] || null;
 }
 function noteInitial(note) {
   const source = `${note?.title || ''} ${note?.description || ''}`.trim();
@@ -644,7 +654,7 @@ const STATUS_ICONS = { unfinished: '○', done: '✓', archived: '✕' };
 function syncArchiveButton() {
   const button = $('#archive-toggle');
   if (!button) return;
-  const count = state.tasks.filter((task) => task.status === 'archived').length + state.notes.filter((note) => note.status === 'archived').length;
+  const count = state.tasks.filter((task) => task.status === 'archived').length + state.notes.filter((note) => note.status === 'archived').length + state.tasks.flatMap((task) => archivedSessions(task)).length;
   button.title = `回收站${count ? `（${count}）` : ''}`;
   button.setAttribute('aria-label', button.title);
   button.classList.toggle('active', state.status === 'archived');
@@ -666,6 +676,7 @@ function syncBoardFilter() {
       ['all', '全部', archivedTasks.length + archivedNotes.length, state.archiveType === 'all', 'archive'],
       ['tasks', '任务', archivedTasks.length, state.archiveType === 'tasks', 'archive'],
       ['notes', '便签', archivedNotes.length, state.archiveType === 'notes', 'archive'],
+      ['sessions', '会话', state.tasks.flatMap((task) => task.sessions || []).filter((session) => session.status === 'archived').length, state.archiveType === 'sessions', 'archive'],
     ];
   } else if (state.boardType === 'notes') {
     options = [
@@ -673,6 +684,14 @@ function syncBoardFilter() {
       ['normal', '无标记', activeNotes.filter((note) => !note.pinnedToTopBar && !note.pinnedToSessionBar).length, state.noteFilter === 'normal', 'note'],
       ['topbar', '提醒标记', activeNotes.filter((note) => note.pinnedToTopBar).length, state.noteFilter === 'topbar', 'note'],
       ['session', '会话标记', activeNotes.filter((note) => note.pinnedToSessionBar).length, state.noteFilter === 'session', 'note'],
+    ];
+  } else if (state.boardType === 'sessions') {
+    const sessions = state.tasks.filter((task) => task.status !== 'archived').flatMap((task) => (task.sessions || []).filter((session) => session.status !== 'archived'));
+    options = [
+      ['all', '全部', sessions.length, state.sessionFilter === 'all', 'session'],
+      ['favorite', '收藏', sessions.filter((session) => session.favorite).length, state.sessionFilter === 'favorite', 'session'],
+      ['running', '运行中', sessions.filter((session) => session.running).length, state.sessionFilter === 'running', 'session'],
+      ['stopped', '关闭中', sessions.filter((session) => !session.running).length, state.sessionFilter === 'stopped', 'session'],
     ];
   } else {
     options = [
@@ -682,7 +701,11 @@ function syncBoardFilter() {
     ];
   }
   root.innerHTML = options.map(([value, label, count, active, type]) => `<button type="button" class="board-filter-option${active ? ' active' : ''}" data-filter-value="${esc(value)}" data-filter-type="${type}" aria-label="${esc(label)}" aria-pressed="${active}"><span>${esc(label)}</span><b>${number(count)}</b></button>`).join('');
-  root.setAttribute('aria-label', state.status === 'archived' ? '回收站筛选' : state.boardType === 'notes' ? '便签筛选' : '任务筛选');
+  let label = '任务筛选';
+  if (state.status === 'archived') label = '回收站筛选';
+  else if (state.boardType === 'notes') label = '便签筛选';
+  else if (state.boardType === 'sessions') label = '会话筛选';
+  root.setAttribute('aria-label', label);
 }
 function visibleTasks() {
   return state.tasks.filter((task) => (state.status ? task.status === state.status : task.status !== 'archived') && (!state.search || `${task.title} ${task.description}`.toLowerCase().includes(state.search.toLowerCase()))).sort((a, b) => {
@@ -703,12 +726,18 @@ const ACTION_ICONS = {
   clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 4v3M16 4v3M4 9.5h16"/></svg>',
   pin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 4 8 8M14 4l6 6-3 1-3 5-2 2-5-3-1 3-2-2 2-2 5-3 1-3-6-6Z"/></svg>',
+  star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></svg>',
   topbar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16M8 7h.01M11 7h.01"/></svg>',
   session: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 3z"/><path d="M8 9h8M8 12h5"/></svg>',
+  task: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
 };
 function actionButton(action, id, label, iconName, className = '', pressed = null) {
   const pressedAttribute = pressed === null ? '' : ` aria-pressed="${pressed}"`;
   return `<button type="button" class="icon-button ${className}" data-action="${action}" data-id="${esc(id)}" title="${label}" aria-label="${label}"${pressedAttribute}>${ACTION_ICONS[iconName]}</button>`;
+}
+function sessionActionButton(action, taskId, sessionId, label, iconName, className = '', pressed = null) {
+  const pressedAttribute = pressed === null ? '' : ` aria-pressed="${pressed}"`;
+  return `<button type="button" class="icon-button ${className}" data-action="${action}" data-task-id="${esc(taskId)}" data-session-id="${esc(sessionId)}" title="${label}" aria-label="${label}"${pressedAttribute}>${ACTION_ICONS[iconName]}</button>`;
 }
 function actions(task) {
   if (task.status === 'archived') return `${actionButton('open-archived-session', task.id, '打开会话', 'open', 'primary')}${actionButton('restore', task.id, '恢复任务', 'restore')}${actionButton('purge', task.id, '永久删除', 'purge', 'danger')}`;
@@ -798,6 +827,7 @@ function archivedGroups(items) {
   if (state.archiveType === 'all' && state.boardGroup === 'kind') return [
     { label: '任务', items: items.filter((item) => item.kind === 'task') },
     { label: '便签', items: items.filter((item) => item.kind === 'note') },
+    { label: '会话', items: items.filter((item) => item.kind === 'session') },
   ].filter((group) => group.items.length > 0);
   if (state.archiveType === 'tasks' && state.boardGroup === 'status') {
     return ['unfinished', 'done', 'archived'].map((key) => ({ label: STATUS[key].label, items: items.filter((item) => (item.value.archivedFromStatus || item.value.status) === key) })).filter((group) => group.items.length > 0);
@@ -812,7 +842,17 @@ function archivedGroups(items) {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, 'zh-CN')).map(([label, groupItems]) => ({ label, items: groupItems }));
   }
   if (state.archiveType === 'notes' && state.boardGroup === 'noteCategory') return NOTE_CATEGORY_GROUPS.map((group) => ({ label: group.label, items: items.filter((item) => group.match(item.value)) })).filter((group) => group.items.length > 0);
+  if (state.archiveType === 'sessions' && state.boardGroup === 'path') {
+    const groups = new Map();
+    items.forEach((item) => { const key = item.value.task.workingDir || '未设置工作路径'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); });
+    return [...groups.entries()].map(([label, groupItems]) => ({ label, items: groupItems }));
+  }
   return [{ label: '废弃卡片', items }];
+}
+function archivedCard(item, compact) {
+  if (item.kind === 'task') return card(item.value, compact);
+  if (item.kind === 'note') return noteCard(item.value, compact);
+  return sessionCard(item.value, compact);
 }
 function renderArchivedList() {
   document.body.classList.add('board-mode');
@@ -820,10 +860,11 @@ function renderArchivedList() {
   const items = [
     ...(state.archiveType === 'all' || state.archiveType === 'tasks' ? visibleTasks().map((task) => ({ kind: 'task', value: task })) : []),
     ...(state.archiveType === 'all' || state.archiveType === 'notes' ? visibleNotes().map((note) => ({ kind: 'note', value: note })) : []),
+    ...(state.archiveType === 'all' || state.archiveType === 'sessions' ? sessionEntries({ archived: true }).filter(({ task, session }) => !state.search || `${task.title} ${task.workingDir || ''} ${session.title || ''}`.toLowerCase().includes(state.search.toLowerCase())).map((entry) => ({ kind: 'session', value: entry })) : []),
   ].sort((a, b) => new Date(b.value.updatedAt) - new Date(a.value.updatedAt));
   const groups = archivedGroups(items);
   const compact = state.boardCardLayout === 'compact';
-  const board = items.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head">${boardGroupBadge(group)}<b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((item) => item.kind === 'task' ? card(item.value, compact) : noteCard(item.value, compact)).join('')}</div></section>`).join('') : '<div class="task-board-empty"><strong>回收站为空</strong></div>';
+  const board = items.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head">${boardGroupBadge(group)}<b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((item) => archivedCard(item, compact)).join('')}</div></section>`).join('') : '<div class="task-board-empty"><strong>回收站为空</strong></div>';
   $('#task-list').innerHTML = `<div class="task-board${compact ? ' compact-card-layout' : ''}">${board}</div>`;
   syncMasonryColumns($('#task-list')); syncOverflowTooltips($('#task-list'));
 }
@@ -831,11 +872,18 @@ function boardGroupOptions() {
   if (state.status === 'archived') {
     if (state.archiveType === 'tasks') return [{ value: 'single', label: '全部' }, { value: 'status', label: '任务状态' }, { value: 'path', label: '工作路径' }, { value: 'color', label: '颜色' }];
     if (state.archiveType === 'notes') return [{ value: 'single', label: '全部' }, { value: 'noteCategory', label: '便签标记' }, { value: 'color', label: '颜色' }];
+    if (state.archiveType === 'sessions') return [{ value: 'single', label: '全部' }, { value: 'path', label: '工作路径' }, { value: 'color', label: '颜色' }];
     return [{ value: 'single', label: '全部' }, { value: 'kind', label: '卡片类别' }, { value: 'color', label: '颜色' }];
   }
   if (state.boardType === 'notes') {
     const options = [{ value: 'single', label: '全部' }, { value: 'color', label: '按颜色' }];
     if (state.noteFilter === 'all') options.push({ value: 'noteCategory', label: '按便签类别' });
+    return options;
+  }
+  if (state.boardType === 'sessions') {
+    const options = [{ value: 'single', label: '全部' }, { value: 'path', label: '按路径' }, { value: 'color', label: '按任务颜色' }];
+    if (state.sessionFilter === 'all' || state.sessionFilter === 'favorite') options.splice(1, 0, { value: 'status', label: '按运行状态' });
+    options.splice(options.findIndex((option) => option.value === 'path'), 0, { value: 'task', label: '按所属任务' });
     return options;
   }
   const options = [{ value: 'single', label: '全部' }];
@@ -874,6 +922,7 @@ function boardGroups(tasks) {
 function renderList() {
   if (state.status === 'archived') return renderArchivedList();
   if (state.boardType === 'notes') return renderNotesList();
+  if (state.boardType === 'sessions') return renderSessionsList();
   document.body.classList.add('board-mode');
   syncTaskToolbarTitle();
   syncBoardFilter();
@@ -893,7 +942,87 @@ function renderList() {
 }
 
 function availableSessions(task) {
-  return Array.isArray(task?.sessions) ? task.sessions : [];
+  return Array.isArray(task?.sessions) ? task.sessions.filter((session) => session.status !== 'archived') : [];
+}
+function archivedSessions(task) {
+  return Array.isArray(task?.sessions) ? task.sessions.filter((session) => session.status === 'archived') : [];
+}
+function sessionEntries({ archived = false } = {}) {
+  return state.tasks.flatMap((task) => (task.sessions || [])
+    .filter((session) => (session.status === 'archived') === archived)
+    .map((session) => ({ task, session })));
+}
+function sessionCard(entry, compact = false) {
+  const { task, session } = entry;
+  const isArchived = session.status === 'archived';
+  const taskArchived = task.status === 'archived';
+  const title = session.title || '新会话';
+  const colorKey = taskColor(task);
+  const customClass = customColors[colorKey] ? ' custom-color' : '';
+  const running = Boolean(session.running);
+  const stateIcon = `<span class="session-card-state${running ? ' running' : ''}" title="${running ? '运行中' : '未运行'}" aria-label="${running ? '运行中' : '未运行'}">${running ? '●' : '○'}</span>`;
+  const stats = session.stats || {};
+  const totalTokens = (Number(stats.input) || 0) + (Number(stats.output) || 0) + (Number(stats.cacheRead) || 0) + (Number(stats.cacheWrite) || 0);
+  const summary = stats.messages || totalTokens
+    ? `总消息 ${compactNumber(stats.messages)} · 总 token ${compactNumber(totalTokens)} · 输入 ${compactNumber(stats.input)} · 输出 ${compactNumber(stats.output)}${session.unreadCount ? ` · 未读 ${compactNumber(session.unreadCount)}` : ''}`
+    : '尚未开始对话';
+  let actionsHtml;
+  if (isArchived) {
+    const restoreState = session.restorableWithTask ? '可随任务恢复' : '不可随任务恢复';
+    const restoreTitle = session.restorableWithTask ? '恢复任务时将一并恢复此会话' : '该会话不会随任务恢复';
+    const openButton = taskArchived ? '' : sessionActionButton('open-session-card', task.id, session.id, '打开会话（恢复并进入）', 'open', 'primary');
+    const stateLabel = taskArchived ? `<span class="session-restore-state" title="${restoreTitle}">${restoreState}</span>` : '';
+    actionsHtml = `${openButton}${stateLabel}${sessionActionButton('purge-session', task.id, session.id, '永久删除会话', 'purge', 'danger')}`;
+  } else {
+    const favoriteLabel = session.favorite ? '取消收藏' : '收藏';
+    const favoriteClass = session.favorite ? 'note-pin-active' : '';
+    actionsHtml = `${sessionActionButton('open-session-card', task.id, session.id, '打开会话', 'open', 'primary')}${sessionActionButton('toggle-session-favorite', task.id, session.id, favoriteLabel, 'star', favoriteClass, session.favorite)}${sessionActionButton('rename-session', task.id, session.id, '重命名会话', 'edit')}${sessionActionButton('delete-session-card', task.id, session.id, '删除会话', 'delete', 'danger')}`;
+  }
+  return `<article class="card session-card${isArchived ? ' archived' : ''} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row">${stateIcon}<h3 class="card-title" data-tooltip="${esc(title)}">${esc(title)}</h3>${session.favorite ? '<span class="session-card-favorite" title="已收藏">★</span>' : ''}</div><div class="session-card-task" data-tooltip="${esc(task.workingDir || '未设置工作路径')}">${ACTION_ICONS.folder} ${esc(task.workingDir || '未设置工作路径')}</div></div></div><p class="card-desc" data-tooltip="${esc(summary)}">${esc(summary)}</p><div class="session-card-meta"><span data-tooltip="${esc(task.title)}">${ACTION_ICONS.task} ${esc(task.title)}</span><span>${ACTION_ICONS.clock} 更新于 ${time(session.updatedAt)}</span></div>${isArchived ? `<div class="archive-info">废弃 · ${time(session.archivedAt)}</div>` : ''}<div class="card-actions">${actionsHtml}</div></article>`;
+}
+function visibleSessionEntries() {
+  const query = state.search.toLowerCase();
+  return sessionEntries().filter(({ task, session }) => {
+    if (task.status === 'archived') return false;
+    if (state.sessionFilter === 'favorite' && !session.favorite) return false;
+    if (state.sessionFilter === 'running' && !session.running) return false;
+    if (state.sessionFilter === 'stopped' && session.running) return false;
+    return !query || `${task.title} ${task.workingDir || ''} ${session.title || ''}`.toLowerCase().includes(query);
+  }).sort((a, b) => {
+    if (state.sort === 'created') return new Date(b.session.createdAt) - new Date(a.session.createdAt);
+    return new Date(b.session.updatedAt) - new Date(a.session.updatedAt);
+  });
+}
+function sessionGroups(items) {
+  if (state.boardGroup === 'status') {
+    return [
+      { label: '运行中', items: items.filter(({ session }) => session.running) },
+      { label: '关闭中', items: items.filter(({ session }) => !session.running) },
+    ].filter((group) => group.items.length > 0);
+  }
+  if (state.boardGroup === 'task') {
+    const groups = new Map();
+    items.forEach((entry) => { const key = entry.task.id; if (!groups.has(key)) groups.set(key, { label: entry.task.title, items: [] }); groups.get(key).items.push(entry); });
+    return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
+  }
+  if (state.boardGroup === 'path') {
+    const groups = new Map();
+    items.forEach((entry) => { const key = entry.task.workingDir || '未设置工作路径'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(entry); });
+    return [...groups.entries()].map(([label, groupItems]) => ({ label, items: groupItems }));
+  }
+  if (state.boardGroup === 'color') return colorGroups(items, (entry) => entry.task);
+  return [{ label: '会话', items }];
+}
+function renderSessionsList() {
+  document.body.classList.add('board-mode');
+  syncTaskToolbarTitle(); syncBoardFilter(); syncSortControl(); syncCardLayoutControl(); syncBoardGroupOptions();
+  const entries = visibleSessionEntries();
+  const groups = sessionGroups(entries);
+  const compact = state.boardCardLayout === 'compact';
+  const empty = `<div class="task-board-empty"><strong>${state.search ? '没有匹配的会话' : '还没有会话'}</strong><p>${state.search ? '试试调整搜索词。' : '创建任务并新建会话，开始协作。'}</p>${state.search ? '<button type="button" data-action="clear-session-filters">清除搜索</button>' : ''}</div>`;
+  const board = entries.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head">${boardGroupBadge(group)}<b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((entry) => sessionCard(entry, compact)).join('')}</div></section>`).join('') : empty;
+  $('#task-list').innerHTML = `<div class="task-board${compact ? ' compact-card-layout' : ''}">${board}</div>`;
+  syncMasonryColumns($('#task-list')); syncOverflowTooltips($('#task-list'));
 }
 function showSessionTask(taskId) {
   state.sessionTaskIds.add(taskId);
@@ -905,6 +1034,11 @@ function sessionTasks() {
 }
 function sessionTreeText(value) {
   return String(value || '').trim().toLocaleLowerCase('zh-CN');
+}
+function workingPathLabel(path) {
+  const normalized = String(path || '').trim().replace(/[\\/]+$/, '');
+  if (!normalized) return '未设置工作路径';
+  return normalized.split(/[\\/]/).pop() || normalized;
 }
 function sessionTreeTime(value) {
   const timestamp = Date.parse(value || '');
@@ -947,27 +1081,116 @@ function sessionTreeVisibleTasks() {
     return { task, sessions, taskMatches };
   }).filter(({ sessions, taskMatches }) => !query || taskMatches || sessions.length).sort(({ task: a }, { task: b }) => sessionTreeCompareTasks(a, b));
 }
+function sessionSwitchMetaText(label) {
+  return `<span class="session-switch-meta-text">${esc(label)}</span>`;
+}
+function sessionSwitchMetaGroup(...items) {
+  return `<span class="session-switch-option-meta">${items.join('')}</span>`;
+}
+function taskSwitchStatusIcon(status) {
+  const normalizedStatus = STATUS[status] ? status : 'unfinished';
+  const label = STATUS[normalizedStatus].label;
+  return `<span class="card-status-icon ${normalizedStatus}" role="img" aria-label="状态：${esc(label)}" title="${esc(label)}">${STATUS_ICONS[normalizedStatus]}</span>`;
+}
+function sessionSwitchStatusIcon(running) {
+  const label = running ? '运行中' : '关闭中';
+  return `<span class="session-card-state${running ? ' running' : ''}" role="img" aria-label="${label}" title="${label}">${running ? '●' : '○'}</span>`;
+}
+function sessionSwitchOptionMarkup(label, attributes, active = false, metaHtml = '') {
+  return `<button type="button" role="menuitem" class="session-switch-option${active ? ' active' : ''}" ${attributes}><span class="session-switch-option-label" data-tooltip="${esc(label)}">${esc(label)}</span>${metaHtml}</button>`;
+}
+function sessionTasksWithChildren() {
+  return sessionTasks().filter((item) => availableSessions(item).length > 0);
+}
+function sessionPathSwitchOptions() {
+  const groups = new Map();
+  sessionTasksWithChildren().forEach((task) => {
+    const path = task.workingDir || '';
+    if (!groups.has(path)) groups.set(path, []);
+    groups.get(path).push(task);
+  });
+  return [...groups.entries()].map(([path, tasks]) => ({ path, tasks })).sort((a, b) => sessionTreeCompareText(a.path || '未设置工作路径', b.path || '未设置工作路径'));
+}
+function lastOpenedSessionForPath(path) {
+  const tasks = sessionPathSwitchOptions().find((item) => item.path === path)?.tasks || [];
+  const entries = tasks.flatMap((task) => availableSessions(task).map((session) => ({ task, session })));
+  return entries.sort(({ session: a }, { session: b }) => sessionTreeTime(b.updatedAt) - sessionTreeTime(a.updatedAt))[0] || null;
+}
+function renderSessionSwitchMenus(task, sessions) {
+  const taskMenu = $('#session-task-switch-menu');
+  const sessionMenu = $('#session-session-switch-menu');
+  const pathMode = state.sessionTreeGroupMode === 'path';
+  if (pathMode) {
+    const pathOptions = sessionPathSwitchOptions();
+    const currentPath = task?.workingDir || '';
+    taskMenu.setAttribute('aria-label', '切换工作路径');
+    taskMenu.innerHTML = pathOptions.length
+      ? pathOptions.map((item) => sessionSwitchOptionMarkup(
+        item.path || '未设置工作路径',
+        `data-session-switch-path="${esc(item.path)}"`,
+        item.path === currentPath,
+      )).join('')
+      : '<span class="session-switch-empty">暂无具有子会话的工作路径</span>';
+  } else {
+    const taskOptions = sessionTasksWithChildren();
+    taskMenu.setAttribute('aria-label', '切换任务');
+    taskMenu.innerHTML = taskOptions.length
+      ? taskOptions.map((item) => sessionSwitchOptionMarkup(
+        item.title || '未命名任务',
+        `data-session-switch-task="${esc(item.id)}"`,
+        item.id === state.sessionTask,
+        sessionSwitchMetaGroup(taskSwitchStatusIcon(item.status)),
+      )).join('')
+      : '<span class="session-switch-empty">暂无具有子会话的任务</span>';
+  }
+  sessionMenu.innerHTML = sessions.length
+    ? sessions.map((item) => sessionSwitchOptionMarkup(
+      item.title || '新会话',
+      `data-session-switch-session="${esc(item.id)}"`,
+      item.id === state.sessionSessionId,
+      sessionSwitchMetaGroup(sessionSwitchStatusIcon(item.running)),
+    )).join('')
+    : '<span class="session-switch-empty">暂无可用子会话</span>';
+  taskMenu.classList.toggle('hidden', sessionSwitchMenuOpen !== 'task');
+  sessionMenu.classList.toggle('hidden', sessionSwitchMenuOpen !== 'session');
+  $('#session-task-name').setAttribute('aria-expanded', String(sessionSwitchMenuOpen === 'task'));
+  $('#session-name').setAttribute('aria-expanded', String(sessionSwitchMenuOpen === 'session'));
+}
 function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
   renderSessionNoteButtons();
   $('#session-view').classList.toggle('no-session', !task);
-  const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
+  const sessions = availableSessions(task);
+  const child = sessions.find((session) => session.id === state.sessionSessionId);
   const sessionName = child ? (child.title || '新会话') : (task ? '新会话' : '选择一个子会话');
   const taskName = task?.title?.trim() || '';
-  const displayName = task ? `${taskName} / ${sessionName}` : sessionName;
+  const pathMode = state.sessionTreeGroupMode === 'path';
+  const groupName = pathMode ? workingPathLabel(task?.workingDir) : taskName;
+  const groupTooltip = pathMode ? (task?.workingDir || '未设置工作路径') : groupName;
+  const groupKind = pathMode ? '工作路径' : '任务';
+  const displayName = task ? `${groupName} / ${sessionName}` : sessionName;
   const taskNameNode = $('#session-task-name');
   const separatorNode = $('#session-title-separator');
-  taskNameNode.textContent = taskName;
-  taskNameNode.classList.toggle('hidden', !taskName);
-  separatorNode.classList.toggle('hidden', !taskName);
+  taskNameNode.textContent = groupName || `选择${groupKind}`;
+  taskNameNode.classList.toggle('hidden', !groupName);
+  taskNameNode.disabled = !task;
+  taskNameNode.title = task ? `切换${groupKind}` : `暂无可用${groupKind}`;
+  taskNameNode.setAttribute('aria-label', task ? `切换${groupKind}` : `暂无可用${groupKind}`);
+  taskNameNode.dataset.tooltip = groupTooltip || `选择${groupKind}`;
+  separatorNode.classList.toggle('hidden', !groupName);
   $('#session-name').textContent = sessionName;
+  $('#session-name').disabled = !task || !sessions.length;
+  $('#session-name').title = task && sessions.length ? '切换子会话' : '暂无可用子会话';
   $('#session-name').dataset.tooltip = displayName;
-  syncOverflowTooltips($('#session-name').parentElement);
-  requestAnimationFrame(() => syncOverflowTooltips($('#session-name').parentElement));
   if (!task) {
     sessionTaskDetailsOpen = false;
     sessionActionMenuOpen = false;
+    sessionSwitchMenuOpen = null;
   }
+  renderSessionSwitchMenus(task, sessions);
+  const titleRow = $('#session-name').closest('.session-title-row');
+  syncOverflowTooltips(titleRow);
+  requestAnimationFrame(() => syncOverflowTooltips(titleRow));
   const sessionActionsButton = $('#copy-session-file');
   const actionMenu = $('#session-action-menu');
   const description = task?.description?.trim() || '';
@@ -979,9 +1202,12 @@ function renderSessionHeader() {
   actionMenu.classList.toggle('hidden', !task || !sessionActionMenuOpen);
   $('#session-action-copy-command').disabled = !sessionPath;
   $('#session-action-copy-description').disabled = !description;
+  $('#session-action-copy-working-dir').disabled = !task?.workingDir?.trim();
+  $('#session-action-rename').disabled = !child;
   $('#session-task-details-panel').classList.toggle('hidden', !task || !sessionTaskDetailsOpen);
   $('#session-task-title-detail').textContent = task?.title || '暂无任务标题';
   $('#session-description-text').textContent = description || '暂无任务描述';
+  $('#session-working-dir-detail').textContent = task?.workingDir?.trim() || '未设置工作路径';
   $('#session-file-path-detail').textContent = sessionPath || '暂无会话文件路径';
   $('#session-task-select').innerHTML = '<option value="">选择一个任务会话</option>' + sessionTasks().filter((item) => availableSessions(item).length > 0).map((item) => `<option value="${item.id}"${item.id === state.sessionTask ? ' selected' : ''}>${esc(item.title)}</option>`).join('');
 }
@@ -998,6 +1224,12 @@ function closeSessionActionMenu() {
   menu?.classList.add('hidden');
   button?.setAttribute('aria-expanded', 'false');
 }
+function closeSessionSwitchMenu() {
+  if (!sessionSwitchMenuOpen) return;
+  sessionSwitchMenuOpen = null;
+  const task = currentTask(state.sessionTask);
+  renderSessionSwitchMenus(task, availableSessions(task));
+}
 function syncSessionTreeUnread(tasks) {
   const root = $('#session-tree');
   for (const task of tasks) {
@@ -1008,17 +1240,37 @@ function syncSessionTreeUnread(tasks) {
       const unread = current ? 0 : (Number(session.unreadCount) || 0);
       const title = session.title || '新会话';
       const unreadLabel = unread > 99 ? '99+' : String(unread);
-      row.querySelector('.child-dot')?.classList.toggle('has-unread', unread > 0);
+      const marker = sessionTreeMarker(session, unread);
+      const favoriteButton = row.querySelector('.child-favorite');
+      if (favoriteButton) {
+        favoriteButton.textContent = marker.icon;
+        favoriteButton.classList.toggle('favorite', Boolean(session.favorite));
+        favoriteButton.classList.toggle('unread', unread > 0);
+        favoriteButton.title = marker.actionLabel;
+        favoriteButton.setAttribute('aria-label', marker.actionLabel);
+        favoriteButton.setAttribute('aria-pressed', String(Boolean(session.favorite)));
+      }
       row.querySelector('.session-child-open')?.setAttribute('aria-label', `${title}${unread ? `，${unreadLabel}条未读消息` : ''}`);
     }
   }
+}
+function sessionTreeMarker(session, unread) {
+  const hasUnread = unread > 0;
+  const favorite = Boolean(session.favorite);
+  let icon = '○';
+  if (favorite) icon = hasUnread ? '★' : '☆';
+  else if (hasUnread) icon = '●';
+  const action = favorite ? '取消收藏会话' : '收藏会话';
+  const unreadText = hasUnread ? `${unread > 99 ? '99+' : unread}条未读消息` : '无未读消息';
+  return { icon, actionLabel: `${action}，${unreadText}` };
 }
 function sessionItemMarkup(task, session, index) {
   const title = session.title || `子会话 ${index + 1}`;
   const current = state.module === 'session' && state.sessionTask === task.id && state.sessionSessionId === session.id;
   const unread = current ? 0 : (Number(session.unreadCount) || 0);
   const unreadLabel = unread > 99 ? '99+' : String(unread);
-  return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="child-dot${unread ? ' has-unread' : ''}" aria-hidden="true"></span><span class="session-title-text-viewport"><span class="session-child-name session-title-text" data-tooltip="${esc(title)}">${esc(title)}</span></span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`;
+  const marker = sessionTreeMarker(session, unread);
+  return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="child-favorite${session.favorite ? ' favorite' : ''}${unread ? ' unread' : ''}" data-favorite-session-task="${esc(task.id)}" data-favorite-session-id="${esc(session.id)}" title="${marker.actionLabel}" aria-label="${marker.actionLabel}" aria-pressed="${Boolean(session.favorite)}">${marker.icon}</button><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="session-title-text-viewport"><span class="session-child-name session-title-text" data-tooltip="${esc(title)}">${esc(title)}</span></span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`;
 }
 function sessionGroupMarkup(task, visibleSessions = availableSessions(task)) {
   const collapsed = state.collapsedSessionTasks.has(task.id);
@@ -1029,10 +1281,30 @@ function sessionGroupMarkup(task, visibleSessions = availableSessions(task)) {
   const items = collapsed ? '' : sessions;
   return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text task-status-${esc(task.status)}" data-tooltip="${esc(task.title)}">${esc(task.title)}</span></span></button>${taskActions}</div>${items}</div>`;
 }
+function sessionTreePathGroups(visibleTasks) {
+  const groups = new Map();
+  visibleTasks.forEach(({ task, sessions }) => {
+    const path = task.workingDir || '未设置工作路径';
+    if (!groups.has(path)) groups.set(path, []);
+    sessions.forEach((session) => groups.get(path).push({ task, session }));
+  });
+  return [...groups.entries()].map(([path, entries]) => ({
+    path,
+    entries: entries.sort(({ session: a }, { session: b }) => sessionTreeCompareSessions(a, b)),
+  })).sort((a, b) => sessionTreeCompareText(a.path, b.path));
+}
+function sessionPathGroupMarkup(path, entries) {
+  const collapsed = state.collapsedSessionPaths.has(path);
+  const sessions = collapsed ? '' : entries.map(({ task, session }, index) => sessionItemMarkup(task, session, index)).join('');
+  const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
+  const actions = `<button type="button" class="session-new-child" data-new-session-path="${esc(path)}" title="新建会话" aria-label="在工作路径${esc(path)}下新建会话">＋</button><button type="button" class="session-remove-task" data-remove-session-path="${esc(path)}" title="从会话管理移除" aria-label="从会话管理移除工作路径${esc(path)}">×</button>`;
+  return `<div class="session-task-group session-path-group"><div class="session-task-heading session-path-heading"><button type="button" class="session-task-title color-gray" data-session-path-group="${esc(path)}" aria-label="${esc(path)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text" data-tooltip="${esc(path)}">${esc(label)}</span></span></button>${actions}</div>${sessions}</div>`;
+}
 function renderSessionTree() {
   renderSessionHeader();
   const visibleTasks = sessionTreeVisibleTasks();
   const tasks = sessionTasks();
+  const pathGroups = sessionTreePathGroups(visibleTasks);
   // 终端输入/输出也会触发刷新；树结构未变化时不要重建 DOM，避免标题滚动动画从头开始。
   const treeSignature = JSON.stringify({
     module: state.module,
@@ -1040,8 +1312,10 @@ function renderSessionTree() {
     sessionSessionId: state.sessionSessionId,
     query: sessionTreeQuery,
     sort: sessionTreeSort,
+    groupMode: state.sessionTreeGroupMode,
     collapsed: [...state.collapsedSessionTasks].sort(),
-    tasks: visibleTasks.map(({ task, sessions }) => [task.id, task.title, task.status, task.color, task.createdAt, task.updatedAt, sessions.map((session) => [session.id, session.title, session.createdAt, session.updatedAt])]),
+    collapsedPaths: [...state.collapsedSessionPaths].sort(),
+    tasks: visibleTasks.map(({ task, sessions }) => [task.id, task.title, task.status, task.color, task.createdAt, task.updatedAt, sessions.map((session) => [session.id, session.title, session.favorite, session.createdAt, session.updatedAt])]),
   });
   if (treeSignature === renderedSessionTreeSignature) {
     syncSessionTreeUnread(tasks);
@@ -1050,7 +1324,9 @@ function renderSessionTree() {
   renderedSessionTreeSignature = treeSignature;
   const emptyText = sessionTreeText(sessionTreeQuery) ? '没有匹配的任务或会话' : '暂无可打开的会话';
   $('#session-tree').innerHTML = visibleTasks.length
-    ? visibleTasks.map(({ task, sessions }) => sessionGroupMarkup(task, sessions)).join('')
+    ? state.sessionTreeGroupMode === 'path'
+      ? pathGroups.map(({ path, entries }) => sessionPathGroupMarkup(path, entries)).join('')
+      : visibleTasks.map(({ task, sessions }) => sessionGroupMarkup(task, sessions)).join('')
     : `<div class="empty sidebar-empty">${emptyText}</div>`;
   syncOverflowTooltips($('#session-tree'));
   syncSessionTreeUnread(tasks);
@@ -1076,7 +1352,7 @@ async function refresh() {
     data.tasks.forEach((task) => { if (availableSessions(task).length > 0) state.sessionTaskIds.add(task.id); });
     if (layoutChanged) saveLayoutState();
     rememberCurrentSessionMessage();
-    if (state.sessionTask && !sessionTasks().some((task) => task.id === state.sessionTask)) {
+    if (state.sessionTask && (!currentTask(state.sessionTask) || !(currentTask(state.sessionTask).sessions || []).some((session) => session.id === state.sessionSessionId))) {
       detachTui();
       state.sessionTask = null;
       state.sessionSessionId = null;
@@ -1273,7 +1549,7 @@ async function openNativeTui() {
   }
   const task = currentTask(taskId);
   if (!task) return toast('请先选择一个会话', 'error');
-  const session = availableSessions(task).find((item) => item.id === sessionId);
+  const session = (task?.sessions || []).find((item) => item.id === sessionId);
   if (!session) return toast('没有可用的历史会话', 'error');
   tuiOpening = (async () => {
     detachTui();
@@ -1409,7 +1685,7 @@ async function restartTuiForTheme() {
 function selectSession(taskId, sessionId = null, { record = true } = {}) {
   if (state.module !== 'session') switchModule('session');
   const task = currentTask(taskId);
-  const target = availableSessions(task).find((session) => session.id === sessionId);
+  const target = (task?.sessions || []).find((session) => session.id === sessionId);
   // 传入的 id 不存在时回退到服务端活跃会话或首个会话
   const nextSessionId = target?.id || task?.activeSessionId || availableSessions(task)[0]?.id || null;
   const changing = state.sessionTask !== taskId || state.sessionSessionId !== nextSessionId;
@@ -1535,10 +1811,11 @@ function openDeleteNoteModal(note) {
 }
 function openTaskForm(task = null, options = {}) {
   const openSessionAfterCreate = Boolean(options.openSessionAfterCreate && !task);
+  const saveLabel = task ? '保存' : openSessionAfterCreate ? '确认并进入终端' : '创建';
   const workingDirEditable = true;
   const workingDirHint = task ? '（仅新会话使用此路径）' : '';
   const workingDirReadonly = workingDirEditable ? '' : ' disabled';
-  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label for="task-working-dir">工作目录${workingDirHint}<div class="path-picker-row"><div class="working-dir-field"><input id="task-working-dir" name="workingDir" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list" value="${esc(task?.workingDir || '')}"${workingDirReadonly}><div id="recent-task-dir-list" class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" id="choose-task-dir" class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button></div><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button type="button" class="primary" id="save-task">${task ? '保存' : '创建'}</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label for="task-working-dir">工作目录${workingDirHint}<div class="path-picker-row"><div class="working-dir-field"><input id="task-working-dir" name="workingDir" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list" value="${esc(task?.workingDir || '')}"${workingDirReadonly}><div id="recent-task-dir-list" class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" id="choose-task-dir" class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button></div><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   const colorPicker = $('#color-picker', form);
   const colorTrigger = $('#color-trigger', form);
@@ -1659,7 +1936,7 @@ function openTaskForm(task = null, options = {}) {
       }
       toast(task ? '任务已保存' : '任务已创建');
       refresh();
-    } catch (error) { button.disabled = false; button.textContent = task ? '保存' : '创建'; toast(error.message, 'error'); }
+    } catch (error) { button.disabled = false; button.textContent = saveLabel; toast(error.message, 'error'); }
   };
 }
 async function restoreTask(task) {
@@ -1672,7 +1949,7 @@ async function restoreTask(task) {
 }
 async function openTaskSession(task) {
   showSessionTask(task.id);
-  const sessions = availableSessions(task);
+  const sessions = Array.isArray(task.sessions) ? task.sessions : [];
   const session = sessions.find((item) => item.id === task.activeSessionId) || sessions[0];
   if (session) await selectSession(task.id, session.id);
   else await openExecute(task);
@@ -1783,6 +2060,61 @@ async function createChildSession(task) {
     toast(error.message, 'error');
   }
 }
+function openNewSessionModal() {
+  const tasks = state.tasks.filter((task) => task.status !== 'archived');
+  if (!tasks.length) {
+    toast('请先新建一个任务', 'error');
+    return;
+  }
+  const form = modal(`<h2>新建会话</h2><label for="new-session-task-input">所属任务<div class="working-dir-field new-session-task-field"><input id="new-session-task-input" name="taskId" autocomplete="off" readonly aria-autocomplete="list" aria-expanded="false" aria-controls="new-session-task-list" value="${esc(tasks[0].title)}"><div id="new-session-task-list" class="recent-dir-list hidden" role="listbox" aria-label="现有任务">${tasks.map((task) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" role="option" data-new-session-task-id="${esc(task.id)}" aria-selected="${task.id === tasks[0].id}">${esc(task.title)}</button></div>`).join('')}</div></div><span class="field-error hidden" data-error-for="new-session-task-input" role="alert"></span></label><label for="new-session-title-input">会话名称<input id="new-session-title-input" name="sessionTitle" autocomplete="off" value="新会话" placeholder="例如：检查登录模块…"><span class="field-error hidden" data-error-for="new-session-title-input" role="alert"></span></label><div class="modal-actions"><button type="button" class="primary" id="create-new-session">创建并进入终端</button><button type="button" data-close>取消</button></div>`);
+  form.classList.add('new-session-modal');
+  $('[data-close]', form).onclick = closeModal;
+  const taskInput = $('#new-session-task-input', form);
+  const taskList = $('#new-session-task-list', form);
+  let taskId = tasks[0].id;
+  const closeTaskList = () => { taskList.classList.add('hidden'); taskInput.setAttribute('aria-expanded', 'false'); };
+  const openTaskList = () => { taskList.classList.remove('hidden'); taskInput.setAttribute('aria-expanded', 'true'); };
+  taskInput.onclick = openTaskList;
+  taskInput.onfocus = openTaskList;
+  taskInput.onblur = () => setTimeout(closeTaskList, 150);
+  taskList.onclick = (event) => {
+    const option = event.target.closest('[data-new-session-task-id]');
+    if (!option) return;
+    taskId = option.dataset.newSessionTaskId;
+    taskInput.value = currentTask(taskId)?.title || option.textContent;
+    taskList.querySelectorAll('[data-new-session-task-id]').forEach((item) => item.setAttribute('aria-selected', String(item === option)));
+    closeTaskList();
+  };
+  $('#create-new-session', form).onclick = async () => {
+    const button = $('#create-new-session', form);
+    const title = $('#new-session-title-input', form).value.trim();
+    setFieldError(form, 'new-session-task-input');
+    setFieldError(form, 'new-session-title-input');
+    if (!taskId || !currentTask(taskId)) {
+      setFieldError(form, 'new-session-task-input', '请选择一个现有任务。');
+      return;
+    }
+    if (!title) {
+      setFieldError(form, 'new-session-title-input', '请输入会话名称。');
+      $('#new-session-title-input', form).focus();
+      return;
+    }
+    try {
+      button.disabled = true;
+      button.textContent = '创建中…';
+      const result = await api(`/tasks/${taskId}/sessions`, { method: 'POST', body: { title } });
+      showSessionTask(taskId);
+      closeModal();
+      await refresh();
+      await selectSession(taskId, result.session.id);
+      toast('会话已创建');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = '创建并进入终端';
+      toast(error.message, 'error');
+    }
+  };
+}
 function openSessionModal(task, session = null) {
   const editing = Boolean(session);
   const form = modal(`<h2>${editing ? '重命名子会话' : '新建子会话'}</h2><p class="hint">任务：${esc(task.title)}</p><label for="session-title-input">会话名称<input id="session-title-input" name="sessionTitle" autocomplete="off" value="${esc(session?.title || '新会话')}" placeholder="例如：检查登录模块…"><span class="field-error hidden" data-error-for="session-title-input" role="alert"></span></label><div class="modal-actions"><button type="button" class="primary" id="save-session">${editing ? '保存' : '创建'}</button><button type="button" data-close>取消</button></div>`);
@@ -1802,22 +2134,29 @@ function openSessionModal(task, session = null) {
   };
 }
 function openDeleteSessionModal(task, sessionId) {
-  const form = modal(`<h2>删除子会话</h2><p>确定删除「${esc(task.title)}」下的这个子会话及其日志吗？</p><div class="modal-actions"><button class="danger" id="confirm-delete-session">删除</button><button data-close>取消</button></div>`);
+  const session = (task.sessions || []).find((item) => item.id === sessionId);
+  const emptySession = (session?.stats?.messages || 0) === 0;
+  const prompt = emptySession
+    ? `「${esc(session?.title || '新会话')}」没有任何消息，删除后将直接永久删除会话文件，且无法恢复。`
+    : `确定将「${esc(task.title)}」下的这个子会话移入回收站吗？会话文件会保留，直到在回收站中永久删除。`;
+  const confirmLabel = emptySession ? '直接永久删除' : '移入回收站';
+  const form = modal(`<h2>${emptySession ? '删除空会话' : '删除子会话'}</h2><p>${prompt}</p><div class="modal-actions"><button class="danger" id="confirm-delete-session">${confirmLabel}</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   $('#confirm-delete-session', form).onclick = async () => {
     try {
       const deletingCurrent = state.sessionTask === task.id && state.sessionSessionId === sessionId;
       if (deletingCurrent) leaveCurrentSession();
       const result = await api(`/tasks/${task.id}/sessions/${sessionId}`, { method: 'DELETE' });
-      const nextSessionId = result.task?.activeSessionId || result.task?.sessions?.[0]?.id || null;
       if (deletingCurrent) {
         detachTui();
-        state.sessionSessionId = nextSessionId || null;
+        state.sessionTask = null;
+        state.sessionSessionId = null;
       }
       closeModal();
       await refresh();
-      if (deletingCurrent && nextSessionId) selectSession(task.id, nextSessionId);
+      if (deletingCurrent) openSessionsBoard();
       saveLayoutState();
+      toast(result.permanentlyDeleted ? '空会话已直接永久删除' : '会话已移入回收站');
     } catch (error) { toast(error.message, 'error'); }
   };
 }
@@ -1855,6 +2194,44 @@ function hideSessionTask(task) {
     renderSessionTree();
     saveLayoutState();
   }
+}
+function hideSessionPath(path) {
+  const tasks = sessionTasks().filter((task) => (task.workingDir || '未设置工作路径') === path);
+  if (!tasks.length) return;
+  const runningTasks = tasks.filter((task) => task.piRunning || availableSessions(task).some((session) => session.running));
+  const runningCount = runningTasks.reduce((count, task) => count + runningSessionCount(task), 0);
+  const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
+  const applyHide = () => {
+    tasks.forEach((task) => {
+      state.sessionTaskIds.delete(task.id);
+      state.hiddenCompletedSessionTasks.add(task.id);
+    });
+    state.collapsedSessionPaths.delete(path);
+    if (tasks.some((task) => task.id === state.sessionTask)) {
+      leaveCurrentSession();
+      detachTui();
+      state.sessionTask = null;
+      state.sessionSessionId = null;
+    }
+    renderSessionTree();
+    saveLayoutState();
+    toast('工作路径已从会话列表移除');
+  };
+  if (!runningTasks.length) return applyHide();
+  const form = modal(`<h2>终止运行中的会话？</h2><p>工作路径「${esc(label)}」下有 ${runningCount} 个子会话正在运行。从会话列表移除此路径会终止这些会话，是否继续？</p><div class="modal-actions"><button type="button" class="danger" id="confirm-hide-session-path">终止并移除</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-hide-session-path', form).onclick = async () => {
+    const button = $('#confirm-hide-session-path', form);
+    button.disabled = true;
+    try {
+      await Promise.all(runningTasks.map((task) => api(`/tasks/${task.id}/terminate`, { method: 'POST' })));
+      closeModal();
+      applyHide();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  };
 }
 function markSessionRead(taskId, sessionId, { keepalive = false } = {}) {
   if (!taskId || !sessionId) return;
@@ -1900,7 +2277,8 @@ function syncModuleTabs() {
   sessionTab.tabIndex = 0;
   const taskActive = !session && state.status !== 'archived' && state.boardType === 'tasks';
   const noteActive = !session && state.status !== 'archived' && state.boardType === 'notes';
-  const sessionActive = session;
+  // 进入具体子会话后，选中态只由会话树中的子会话表示；顶部“会话”按钮仅表示会话看板。
+  const sessionActive = !session && !state.status && state.boardType === 'sessions';
   tasks.classList.toggle('active', taskActive);
   notes.classList.toggle('active', noteActive);
   sessionTab.classList.toggle('active', sessionActive);
@@ -1909,10 +2287,10 @@ function syncModuleTabs() {
   sessionTab.setAttribute('aria-selected', String(sessionActive));
   workspaceTasks?.classList.toggle('active', taskActive);
   workspaceNotes?.classList.toggle('active', noteActive);
-  workspaceSession?.classList.toggle('active', session);
+  workspaceSession?.classList.toggle('active', sessionActive);
   workspaceTasks?.setAttribute('aria-pressed', String(taskActive));
   workspaceNotes?.setAttribute('aria-pressed', String(noteActive));
-  workspaceSession?.setAttribute('aria-pressed', String(session));
+  workspaceSession?.setAttribute('aria-pressed', String(sessionActive));
 }
 function switchModule(module) {
   const session = module === 'session';
@@ -1942,20 +2320,25 @@ function switchModule(module) {
 }
 
 function closeThemeMenu() {
-  const menu = $('#theme-menu');
+  const menu = $('#display-settings-menu');
   if (!menu || menu.classList.contains('hidden')) return;
   menu.classList.add('hidden');
-  $('#style-toggle').setAttribute('aria-expanded', 'false');
+  $('#display-settings-toggle').setAttribute('aria-expanded', 'false');
 }
 function syncSessionTreeToolState() {
+  const groupToggle = $('#session-tree-group-toggle');
   const searchToggle = $('#session-tree-search-toggle');
   const sortToggle = $('#session-tree-sort-toggle');
+  const groupMenu = $('#session-tree-group-menu');
   const searchPanel = $('#session-tree-search-panel');
   const sortMenu = $('#session-tree-sort-menu');
+  groupToggle?.classList.toggle('active', sessionTreeGroupOpen);
+  groupToggle?.setAttribute('aria-expanded', String(sessionTreeGroupOpen));
   searchToggle?.classList.toggle('active', sessionTreeSearchOpen || Boolean(sessionTreeQuery.trim()));
   searchToggle?.setAttribute('aria-expanded', String(sessionTreeSearchOpen));
   sortToggle?.classList.toggle('active', sessionTreeSortOpen);
   sortToggle?.setAttribute('aria-expanded', String(sessionTreeSortOpen));
+  groupMenu?.classList.toggle('hidden', !sessionTreeGroupOpen);
   searchPanel?.classList.toggle('hidden', !sessionTreeSearchOpen);
   sortMenu?.classList.toggle('hidden', !sessionTreeSortOpen);
   const input = $('#session-tree-search-input');
@@ -1963,24 +2346,34 @@ function syncSessionTreeToolState() {
   document.querySelectorAll('[data-session-sort]').forEach((button) => {
     button.setAttribute('aria-checked', String(button.dataset.sessionSort === sessionTreeSort));
   });
+  document.querySelectorAll('[data-session-group-mode]').forEach((button) => {
+    button.setAttribute('aria-checked', String(button.dataset.sessionGroupMode === state.sessionTreeGroupMode));
+  });
 }
 function closeSessionTreeTools() {
-  if (!sessionTreeSearchOpen && !sessionTreeSortOpen) return;
+  if (!sessionTreeGroupOpen && !sessionTreeSearchOpen && !sessionTreeSortOpen) return;
+  sessionTreeGroupOpen = false;
   sessionTreeSearchOpen = false;
   sessionTreeSortOpen = false;
   syncSessionTreeToolState();
 }
 function toggleSessionTreeSearch() {
   sessionTreeSearchOpen = !sessionTreeSearchOpen;
-  if (sessionTreeSearchOpen) sessionTreeSortOpen = false;
+  if (sessionTreeSearchOpen) { sessionTreeGroupOpen = false; sessionTreeSortOpen = false; }
   if (sessionTreeSearchOpen) closeThemeMenu();
   syncSessionTreeToolState();
   if (sessionTreeSearchOpen) requestAnimationFrame(() => $('#session-tree-search-input')?.focus());
 }
 function toggleSessionTreeSort() {
   sessionTreeSortOpen = !sessionTreeSortOpen;
-  if (sessionTreeSortOpen) sessionTreeSearchOpen = false;
+  if (sessionTreeSortOpen) { sessionTreeGroupOpen = false; sessionTreeSearchOpen = false; }
   if (sessionTreeSortOpen) closeThemeMenu();
+  syncSessionTreeToolState();
+}
+function toggleSessionTreeGroup() {
+  sessionTreeGroupOpen = !sessionTreeGroupOpen;
+  if (sessionTreeGroupOpen) { sessionTreeSearchOpen = false; sessionTreeSortOpen = false; }
+  if (sessionTreeGroupOpen) closeThemeMenu();
   syncSessionTreeToolState();
 }
 let topbarNoteMenuAnchor = null;
@@ -2028,30 +2421,28 @@ function openTopbarNoteMenu(button, note) {
     else void removeTopbarNote(note);
   };
 }
-function toggleThemeMenu(focusSelector) {
-  const menu = $('#theme-menu');
+function toggleThemeMenu() {
+  const menu = $('#display-settings-menu');
   const open = menu.classList.contains('hidden');
   menu.classList.toggle('hidden', !open);
-  $('#style-toggle').setAttribute('aria-expanded', String(open));
-  if (open) menu.querySelector(focusSelector)?.focus();
+  $('#display-settings-toggle').setAttribute('aria-expanded', String(open));
 }
-$('#style-toggle').onclick = () => toggleThemeMenu('[data-theme-style][aria-checked="true"]');
-$('#mode-toggle').onclick = () => {
-  const modes = ['system', 'light', 'dark'];
-  const current = modes.includes(localStorage.getItem('workbench-theme')) ? localStorage.getItem('workbench-theme') : 'system';
-  applyTheme(modes[(modes.indexOf(current) + 1) % modes.length]);
-  void restartTuiForTheme();
-  closeThemeMenu();
-};
-$('#theme-menu').onclick = (event) => {
+$('#display-settings-toggle').onclick = () => toggleThemeMenu();
+$('#display-settings-menu').onclick = (event) => {
   const style = event.target.closest('[data-theme-style]');
-  if (!style) return;
-  applyThemeStyle(style.dataset.themeStyle);
+  const mode = event.target.closest('[data-display-mode]');
+  if (style) applyThemeStyle(style.dataset.themeStyle);
+  else if (mode) applyTheme(mode.dataset.displayMode);
+  else return;
   void restartTuiForTheme();
   closeThemeMenu();
 };
 document.addEventListener('click', (event) => {
-  if (!event.target.closest('#style-toggle, #mode-toggle, #theme-menu')) closeThemeMenu();
+  if (!event.target.closest('#display-settings-toggle, #display-settings-menu')) closeThemeMenu();
+  if (!event.target.closest('#session-tree-group-toggle, #session-tree-group-menu')) {
+    sessionTreeGroupOpen = false;
+    syncSessionTreeToolState();
+  }
   if (!event.target.closest('#session-tree-search-toggle, #session-tree-search-panel')) {
     sessionTreeSearchOpen = false;
     syncSessionTreeToolState();
@@ -2062,6 +2453,7 @@ document.addEventListener('click', (event) => {
   }
   if (!event.target.closest('#topbar-note-buttons, .topbar-note-menu')) closeTopbarNotePanel();
   if (!event.target.closest('#session-note-buttons, .session-note-menu:not(.topbar-note-menu)')) closeSessionNoteMenu();
+  if (!event.target.closest('.session-title-switcher, .session-switch-menu')) closeSessionSwitchMenu();
   if (!event.target.closest('#session-context-copy')) {
     closeSessionActionMenu();
     if (sessionTaskDetailsOpen) closeSessionTaskDetails();
@@ -2072,6 +2464,7 @@ document.addEventListener('keydown', (event) => {
     closeThemeMenu(); closeTopbarNotePanel(); closeSessionNoteMenu();
     closeSessionTreeTools();
     closeSessionActionMenu();
+    closeSessionSwitchMenu();
     if (sessionTaskDetailsOpen) closeSessionTaskDetails();
   }
 });
@@ -2094,18 +2487,17 @@ function openBoardType(type) {
   saveLayoutState();
   recordWorkspaceView();
 }
-function openLastSession() {
-  const last = findLastOpenedSession();
-  if (!last) return toast('暂无可打开的历史会话', 'error');
-  showSessionTask(last.taskId);
-  void selectSession(last.taskId, last.sessionId);
-}
+function openSessionsBoard() { openBoardType('sessions'); }
 $('#module-tasks').onclick = () => openBoardType('tasks');
 $('#module-notes').onclick = () => openBoardType('notes');
-$('#module-sessions').onclick = openLastSession;
+$('#module-sessions').onclick = openSessionsBoard;
 $('#workspace-module-tasks').onclick = () => openBoardType('tasks');
 $('#workspace-module-notes').onclick = () => openBoardType('notes');
-$('#workspace-module-session').onclick = openLastSession;
+$('#workspace-module-session').onclick = openSessionsBoard;
+$('#session-tree-group-toggle').onclick = (event) => {
+  event.stopPropagation();
+  toggleSessionTreeGroup();
+};
 $('#session-tree-search-toggle').onclick = (event) => {
   event.stopPropagation();
   toggleSessionTreeSearch();
@@ -2144,6 +2536,15 @@ $('#session-tree-sort-menu').onclick = (event) => {
   renderSessionTree();
   syncSessionTreeToolState();
 };
+$('#session-tree-group-menu').onclick = (event) => {
+  const option = event.target.closest('[data-session-group-mode]');
+  if (!option || !['task', 'path'].includes(option.dataset.sessionGroupMode)) return;
+  state.sessionTreeGroupMode = option.dataset.sessionGroupMode;
+  sessionTreeGroupOpen = false;
+  renderSessionTree();
+  syncSessionTreeToolState();
+  saveLayoutState();
+};
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
   state.sidebarCollapsed = collapsed;
@@ -2167,18 +2568,17 @@ $('#sidebar-toggle').onclick = () => {
 });
 $('#archive-toggle').onclick = () => {
   state.status = 'archived';
-  state.archiveType = 'all';
   applyViewSettings();
   switchModule('tasks');
   renderList();
   saveLayoutState();
   recordWorkspaceView();
 };
-// 任务入口只创建任务，不预建会话。
-$('#sidebar-new-task').onclick = () => openTaskForm();
+// 任务入口会在创建后打开首个会话；新建任务本身仍不预建会话。
+$('#sidebar-new-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
 $('#sidebar-new-note').onclick = () => openNewBoardItem('notes');
-$('#toolbar-new-item').onclick = () => openNewBoardItem(state.boardType);
-$('#sidebar-new-session-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
+$('#toolbar-new-item').onclick = () => state.boardType === 'sessions' ? openNewSessionModal() : openNewBoardItem(state.boardType);
+$('#sidebar-new-session-task').onclick = () => openNewSessionModal();
 function clearTerminalSearch() {
   const input = $('#terminal-search-input');
   if (!input) return;
@@ -2252,10 +2652,57 @@ function restoreTerminalFocusAfterSidebarInteraction(event) {
 }
 document.addEventListener('pointerup', restoreTerminalFocusAfterSidebarInteraction);
 document.addEventListener('click', restoreTerminalFocusAfterSidebarInteraction);
+function toggleSessionSwitchMenu(kind) {
+  const task = currentTask(state.sessionTask);
+  if (kind === 'task' && !(state.sessionTreeGroupMode === 'path' ? sessionPathSwitchOptions().length : sessionTasksWithChildren().length)) return;
+  if (kind === 'session' && (!task || !availableSessions(task).length)) return;
+  sessionActionMenuOpen = false;
+  sessionTaskDetailsOpen = false;
+  sessionSwitchMenuOpen = sessionSwitchMenuOpen === kind ? null : kind;
+  renderSessionHeader();
+}
+$('#session-task-name').onclick = (event) => {
+  event.stopPropagation();
+  toggleSessionSwitchMenu('task');
+};
+$('#session-name').onclick = (event) => {
+  event.stopPropagation();
+  toggleSessionSwitchMenu('session');
+};
+$('#session-task-switch-menu').onclick = (event) => {
+  const pathOption = event.target.closest('[data-session-switch-path]');
+  if (pathOption) {
+    const entry = lastOpenedSessionForPath(pathOption.dataset.sessionSwitchPath);
+    if (!entry) return;
+    sessionSwitchMenuOpen = null;
+    void selectSession(entry.task.id, entry.session.id);
+    return;
+  }
+  const option = event.target.closest('[data-session-switch-task]');
+  if (!option) return;
+  const task = currentTask(option.dataset.sessionSwitchTask);
+  if (!task) return;
+  sessionSwitchMenuOpen = null;
+  const session = lastOpenedSessionForTask(task);
+  if (session) {
+    void selectSession(task.id, session.id);
+    return;
+  }
+};
+$('#session-session-switch-menu').onclick = (event) => {
+  const option = event.target.closest('[data-session-switch-session]');
+  if (!option) return;
+  const task = currentTask(state.sessionTask);
+  const session = availableSessions(task).find((item) => item.id === option.dataset.sessionSwitchSession);
+  if (!task || !session) return;
+  sessionSwitchMenuOpen = null;
+  void selectSession(task.id, session.id);
+};
 $('#copy-session-file').onclick = (event) => {
   event.stopPropagation();
   const task = currentTask(state.sessionTask);
   if (!task) return;
+  sessionSwitchMenuOpen = null;
   sessionActionMenuOpen = !sessionActionMenuOpen;
   if (sessionActionMenuOpen) sessionTaskDetailsOpen = false;
   renderSessionHeader();
@@ -2264,22 +2711,32 @@ $('#session-action-menu').onclick = async (event) => {
   const action = event.target.closest('[data-session-action]');
   if (!action || action.disabled) return;
   const task = currentTask(state.sessionTask);
-  const session = availableSessions(task).find((item) => item.id === state.sessionSessionId);
+  const session = (task?.sessions || []).find((item) => item.id === state.sessionSessionId);
   const commandPath = session?.sessionFile;
   const description = task?.description?.trim();
+  const workingDir = task?.workingDir?.trim();
+  const kind = action.dataset.sessionAction;
+  if (kind === 'copy') return; // 顶层「复制」仅负责展开子菜单（悬停）
   closeSessionActionMenu();
-  if (action.dataset.sessionAction === 'details') {
+  if (kind === 'details') {
     sessionTaskDetailsOpen = true;
     renderSessionHeader();
     return;
   }
-  const text = action.dataset.sessionAction === 'copy-command'
+  if (kind === 'rename') {
+    openSessionModal(task, session);
+    return;
+  }
+  const text = kind === 'copy-command'
     ? (commandPath ? `pi --session "${commandPath}"` : '')
-    : (description || '');
+    : kind === 'copy-working-dir'
+      ? workingDir || ''
+      : (description || '');
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    toast(action.dataset.sessionAction === 'copy-command' ? 'pi 会话命令已复制' : '任务描述已复制');
+    const copyMessages = { 'copy-command': 'pi 会话命令已复制', 'copy-working-dir': '工作路径已复制', 'copy-description': '任务描述已复制' };
+    toast(copyMessages[kind] || '已复制');
   } catch {
     toast('复制失败，请手动选择内容', 'error');
   }
@@ -2446,14 +2903,36 @@ async function reconnectTreeSession(taskId, sessionId) {
   if (state.module !== 'session' || state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return selectSession(taskId, sessionId);
   return restartCurrentTui('正在重新连接会话…');
 }
+async function toggleSessionFavorite(task, session) {
+  try {
+    await api(`/tasks/${task.id}/sessions/${session.id}`, { method: 'PATCH', body: { favorite: !session.favorite } });
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
 $('#session-tree').onclick = (event) => {
   const create = event.target.closest('[data-new-session-task]');
   if (create) { const task = currentTask(create.dataset.newSessionTask); if (task) void createChildSession(task); return; }
+  if (event.target.closest('[data-new-session-path]')) { openNewSessionModal(); return; }
+  const favorite = event.target.closest('[data-favorite-session-task]');
+  if (favorite) {
+    event.stopPropagation();
+    const task = currentTask(favorite.dataset.favoriteSessionTask);
+    const session = availableSessions(task).find((item) => item.id === favorite.dataset.favoriteSessionId);
+    if (task && session) void toggleSessionFavorite(task, session);
+    return;
+  }
   const removeCompleted = event.target.closest('[data-remove-completed-task]');
   if (removeCompleted) {
     event.stopPropagation();
     const task = currentTask(removeCompleted.dataset.removeCompletedTask);
     if (task) hideSessionTask(task);
+    return;
+  }
+  const removePath = event.target.closest('[data-remove-session-path]');
+  if (removePath) {
+    hideSessionPath(removePath.dataset.removeSessionPath);
     return;
   }
   const remove = event.target.closest('[data-delete-session]');
@@ -2463,6 +2942,15 @@ $('#session-tree').onclick = (event) => {
     const id = group.dataset.sessionGroup;
     if (state.collapsedSessionTasks.has(id)) state.collapsedSessionTasks.delete(id);
     else state.collapsedSessionTasks.add(id);
+    renderSessionTree();
+    saveLayoutState();
+    return;
+  }
+  const pathGroup = event.target.closest('[data-session-path-group]');
+  if (pathGroup) {
+    const path = pathGroup.dataset.sessionPathGroup;
+    if (state.collapsedSessionPaths.has(path)) state.collapsedSessionPaths.delete(path);
+    else state.collapsedSessionPaths.add(path);
     renderSessionTree();
     saveLayoutState();
     return;
@@ -2494,6 +2982,10 @@ $('#board-filter-tabs').onclick = (event) => {
     state.boardType = 'notes';
     state.status = '';
     state.noteFilter = value;
+  } else if (filter.dataset.filterType === 'session') {
+    state.boardType = 'sessions';
+    state.status = '';
+    state.sessionFilter = value;
   } else {
     state.boardType = 'tasks';
     state.status = value;
@@ -2529,14 +3021,68 @@ document.addEventListener('keydown', (event) => {
     else openTaskForm();
   }
 });
+function clearBoardSearch() {
+  state.search = '';
+  $('#search').value = '';
+  renderList();
+  saveLayoutState();
+  recordWorkspaceView();
+}
 $('#task-list').onclick = async (event) => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   if (button.dataset.action === 'purge-archived') {
     openClearArchivedModal();
     return;
   }
-  if (button.dataset.action === 'clear-note-filters') {
-    state.search = ''; $('#search').value = ''; renderList(); saveLayoutState(); recordWorkspaceView(); return;
+  if (button.dataset.action === 'clear-note-filters' || button.dataset.action === 'clear-session-filters') {
+    clearBoardSearch();
+    return;
+  }
+  if (button.dataset.taskId && button.dataset.sessionId) {
+    const task = currentTask(button.dataset.taskId);
+    const session = (task?.sessions || []).find((item) => item.id === button.dataset.sessionId);
+    if (!task || !session) return;
+    try {
+      switch (button.dataset.action) {
+        case 'open-session-card':
+          if (session.status === 'archived' && task.status !== 'archived') {
+            await api(`/tasks/${task.id}/sessions/${session.id}/restore`, { method: 'POST' });
+            await refresh();
+          }
+          showSessionTask(task.id);
+          await selectSession(task.id, session.id);
+          break;
+        case 'toggle-session-favorite':
+          await toggleSessionFavorite(task, session);
+          break;
+        case 'rename-session':
+          openSessionModal(task, session);
+          break;
+        case 'delete-session-card':
+          openDeleteSessionModal(task, session.id);
+          break;
+        case 'purge-session': {
+          const form = modal(`<h2>永久删除会话</h2><p>确定永久删除会话「${esc(session.title || '新会话')}」及其会话文件吗？此操作不可恢复。</p><div class="modal-actions"><button class="danger" id="confirm-purge-session">永久删除</button><button data-close>取消</button></div>`);
+          $('[data-close]', form).onclick = closeModal;
+          $('#confirm-purge-session', form).onclick = async () => {
+            try {
+              await api(`/tasks/${task.id}/sessions/${session.id}/permanent`, { method: 'DELETE' });
+              closeModal();
+              await refresh();
+              toast('会话已永久删除');
+            } catch (error) {
+              toast(error.message, 'error');
+            }
+          };
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+    return;
   }
   const noteActions = ['edit-note', 'delete-note', 'restore-note', 'purge-note', 'toggle-top-note', 'toggle-session-note'];
   // 回收站的“全部”视图可能在便签页状态下同时渲染任务和便签，不能仅凭 boardType 分流。

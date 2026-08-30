@@ -34,6 +34,19 @@ test('normalizeTasks migrates legacy unfinished statuses', () => {
   assert.deepEqual(result.tasks.map((task) => task.status), ['unfinished', 'unfinished']);
 });
 
+test('normalizeTasks adds session card lifecycle fields without changing the JSONL binding', () => {
+  const sessionFile = '/tmp/session.jsonl';
+  const task = { id: 'session-card', status: 'unfinished', sessions: [{ id: 'child', title: '旧会话', sessionFile }] };
+  const result = normalizeTasks([task], new Date('2026-01-01T00:00:00.000Z'));
+  const [session] = result.tasks[0].sessions;
+  assert.equal(result.changed, true);
+  assert.equal(session.sessionFile, sessionFile);
+  assert.equal(session.status, 'active');
+  assert.equal(session.favorite, false);
+  assert.equal(session.restorableWithTask, false);
+  assert.equal(session.archivedAt, null);
+});
+
 test('normalizeNotes keeps optional titles and removes notes without descriptions', () => {
   const result = normalizeNotes([
     {
