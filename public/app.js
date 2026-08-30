@@ -832,8 +832,15 @@ function renderSessionHeader() {
   $('#session-view').classList.toggle('no-session', !task);
   const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
   const sessionName = child ? (child.title || '新会话') : (task ? '新会话' : '选择一个子会话');
+  const taskName = task?.title?.trim() || '';
+  const displayName = task ? `${taskName} / ${sessionName}` : sessionName;
+  const taskNameNode = $('#session-task-name');
+  const separatorNode = $('#session-title-separator');
+  taskNameNode.textContent = taskName;
+  taskNameNode.classList.toggle('hidden', !taskName);
+  separatorNode.classList.toggle('hidden', !taskName);
   $('#session-name').textContent = sessionName;
-  $('#session-name').dataset.tooltip = sessionName;
+  $('#session-name').dataset.tooltip = displayName;
   syncOverflowTooltips($('#session-name').parentElement);
   requestAnimationFrame(() => syncOverflowTooltips($('#session-name').parentElement));
   if (!task) {

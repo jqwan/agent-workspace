@@ -1229,7 +1229,10 @@ body.session-mode .topbar > .session-header .session-context-copy { width: 100%;
 .session-toolbar-intro .section-kicker { flex: 0 0 auto; font-size: 9px; }
 .session-toolbar-intro .session-title-row { flex: 0 1 auto; align-items: center; width: fit-content; max-width: 100%; min-width: 0; overflow: visible; }
 .session-toolbar-intro .session-title-text-viewport { flex: 0 1 auto; min-width: 0; }
-.session-toolbar-intro .session-name-title { max-width: none; font-size: 14px; font-weight: 600; line-height: 1.2; letter-spacing: -.02em; user-select: text; -webkit-user-select: text; cursor: text; }
+.session-toolbar-intro .session-task-name { min-width: 0; max-width: min(30vw, 260px); overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.session-toolbar-intro .session-title-separator { flex: 0 0 auto; color: var(--muted); font-size: 14px; font-weight: 500; line-height: 1.2; }
+.session-toolbar-intro .session-name-title { max-width: none; font-size: 14px; font-weight: 500; line-height: 1.2; letter-spacing: -.02em; user-select: text; -webkit-user-select: text; cursor: text; }
+.session-toolbar-intro .session-title-row > .session-title-text-viewport { margin-left: 0; padding-left: 0; }
 .session-toolbar-intro .session-title-button:hover:not(:disabled) { color: var(--ink); }
 .session-file-row { margin-top: 2px; }
 .sidebar-nav { padding-top: 6px; padding-bottom: 6px; }
@@ -1731,15 +1734,27 @@ body.theme-geek .topbar > .workspace-page-header .toolbar-intro h1 { font-size: 
 
 /* 终端搜索与看板工具栏的最终布局。 */
 .terminal-search {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.terminal-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  z-index: 1;
+  color: var(--teal);
+  font-size: 19px;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 .terminal-search input {
   width: min(260px, 28vw);
   min-width: 120px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 8px 0 29px;
   border: 1px solid var(--line);
   background: var(--surface-raised);
   color: var(--ink);
@@ -1754,6 +1769,22 @@ body.theme-geek .topbar > .workspace-page-header .toolbar-intro h1 { font-size: 
 @media (max-width: 760px) {
   .terminal-search input { width: min(180px, 42vw); min-width: 100px; }
   .terminal-search-results { display: none; }
+}
+@media (min-width: 761px) {
+  body.session-mode .topbar > .session-header .session-context {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  body.session-mode .topbar > .session-header .session-controls,
+  body.session-mode .topbar > .session-header .terminal-search {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  body.session-mode .topbar > .session-header .terminal-search input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 120px;
+  }
 }
 
 /* 任务、便签和回收站的筛选与工具统一收纳到顶部标题栏。 */
