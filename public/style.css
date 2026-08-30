@@ -670,24 +670,6 @@ body.theme-dark .modal input[aria-invalid="true"], body:not(.theme-light) .modal
 .toast-close { padding: 2px 5px; font-size: 18px; line-height: 1; }
 .toast.out { opacity: 0; transform: translateY(-4px); transition: opacity .3s ease, transform .3s ease; }
 
-/* 收起侧边栏时保留左下角工作区控制区，只有导航和会话内容收起。 */
-body.sidebar-collapsed #app-sidebar {
-  flex-basis: 0;
-  width: 0;
-  overflow: visible;
-  border-right: 0;
-}
-body.sidebar-collapsed #app-sidebar > .sidebar-nav,
-body.sidebar-collapsed #app-sidebar > .sidebar-panel { display: none; }
-body.sidebar-collapsed #app-sidebar > .sidebar-header {
-  position: fixed;
-  left: 0;
-  bottom: 0;
-  z-index: 6;
-  width: var(--sidebar-width);
-  border-right: 1px solid var(--line);
-  box-shadow: 0 -4px 14px color-mix(in srgb, var(--ink) 8%, transparent);
-}
 /* Native TUI workspace */
 body.session-mode { overflow: hidden; background: var(--terminal); }
 body.session-mode #workspace-shell { height: calc(var(--app-viewport-height, 100dvh) - var(--topbar-height)); min-height: 0; }
@@ -989,7 +971,7 @@ body {
   overscroll-behavior: contain;
 }
 /* 打开主题菜单时允许它越过侧栏边界，并确保显示在右侧工作区之上。 */
-#app-sidebar:has(#theme-menu:not(.hidden)) {
+.topbar:has(#theme-menu:not(.hidden)) {
   z-index: 5;
   overflow: visible;
 }
@@ -1481,25 +1463,6 @@ body.theme-newspaper.theme-dark {
 .workspace-history-button:hover:not(:disabled) { border-color: transparent; background: var(--surface-muted); color: var(--accent-strong); }
 .workspace-history-button:disabled { opacity: .3; background: transparent; cursor: default; }
 .sidebar-toggle svg { width: 16px; height: 16px; stroke-width: 1.5; }
-/* 侧栏底部固定工作区控制区：保持 π 标识和三个控制按钮的整体布局。 */
-#app-sidebar .sidebar-nav { order: 1; }
-#app-sidebar .sidebar-panel { order: 2; }
-#app-sidebar .sidebar-header {
-  order: 3;
-  height: 42px;
-  min-height: 42px;
-  border-top: 1px solid var(--line);
-  border-bottom: 0;
-}
-body.theme-geek #app-sidebar .sidebar-header { border-top-style: dashed; }
-body.theme-aurora #app-sidebar .sidebar-header { border-top-color: color-mix(in srgb, var(--accent) 20%, var(--line)); }
-body.theme-newspaper #app-sidebar .sidebar-header { border-top: 3px double var(--line-strong); }
-/* 左下角品牌图标与控制按钮使用相同尺寸。 */
-#app-sidebar .sidebar-header .brand-mark {
-  width: 28px;
-  height: 28px;
-}
-
 /* 顶栏左侧的三个工作区入口：只保留图标，悬停/聚焦时仍提供完整语义。 */
 .workspace-module-nav {
   display: flex;
@@ -1552,10 +1515,10 @@ body.theme-newspaper #app-sidebar .sidebar-header { border-top: 3px double var(-
   .sidebar-toggle,
   .workspace-history-button { width: 25px; min-width: 25px; height: 25px; }
   .workspace-module-button { width: 25px; min-width: 25px; height: 25px; }
-  #app-sidebar .sidebar-header .brand-mark { width: 25px; height: 25px; }
+  .bottom-bar-controls .sidebar-header .brand-mark { width: 25px; height: 25px; }
 }
-/* 七个工作区统一使用同一规格的结构分割线，避免主题样式叠加出双线或粗线。 */
-/* 顶栏由两个直接子区域各自绘制底线，避免父级边框被标题容器覆盖或重复绘制。 */
+/* 六个同级工作区统一使用同一规格的结构分割线，避免主题样式叠加出双线或粗线。 */
+/* 顶栏区域的底线由同级控制区与标题区分别绘制，保证六区网格连续。 */
 .topbar { border-bottom: 0; }
 body.theme-classic .topbar,
 body.theme-geek .topbar,
@@ -1566,21 +1529,19 @@ body.theme-newspaper .topbar { border-bottom: 0; }
 .topbar > .session-header { border-bottom: 1px solid var(--line); }
 #app-sidebar { border: 0; border-right: 1px solid var(--line); }
 #app-sidebar .sidebar-nav { border: 0; border-bottom: 1px solid var(--line); }
-#app-sidebar > .sidebar-header {
+.bottom-bar-controls > .sidebar-header {
   justify-content: space-between;
   gap: 0;
   border: 0;
-  border-top: 1px solid var(--line);
 }
-#app-sidebar .sidebar-header-actions { margin-left: 0; gap: 3px; }
+.bottom-bar-controls .sidebar-header-actions { margin-left: 0; gap: 3px; }
 body.sidebar-collapsed #app-sidebar { border-right: 0; }
 /* 顶部控制组与底部控制组交换后，仍保持同一按钮规格和紧凑间距。 */
 .topbar-brand { gap: 0; }
 .topbar-brand .workspace-history-controls,
-#app-sidebar .sidebar-header-actions,
-#app-sidebar .workspace-module-nav { display: contents; }
+.bottom-bar-controls .sidebar-header-actions,
+.bottom-bar-controls .workspace-module-nav { display: contents; }
 /* 主题菜单跟随已经移到顶部的主题按钮，在标题栏下方展开。 */
-#app-sidebar #theme-menu { top: 8px; bottom: auto; left: 4px; }
 /* 左上角右侧控制按钮与工作区入口统一悬浮、聚焦和选中反馈。 */
 .topbar-brand .workspace-module-button:hover,
 .topbar-brand .workspace-module-button:focus-visible {
@@ -1596,17 +1557,17 @@ body.sidebar-collapsed #app-sidebar { border-right: 0; }
   color: var(--accent-strong);
 }
 /* 左下角品牌图标沿用各主题控制按钮的圆角，保持同一组控件的形状语言。 */
-body.theme-classic #app-sidebar .sidebar-header .brand-mark { border-radius: 7px; }
-body.theme-geek #app-sidebar .sidebar-header .brand-mark { border-radius: 1px; }
-body.theme-aurora #app-sidebar .sidebar-header .brand-mark { border-radius: 12px; }
-body.theme-newspaper #app-sidebar .sidebar-header .brand-mark { border-radius: 0; }
+body.theme-classic .bottom-bar-controls .sidebar-header .brand-mark { border-radius: 7px; }
+body.theme-geek .bottom-bar-controls .sidebar-header .brand-mark { border-radius: 1px; }
+body.theme-aurora .bottom-bar-controls .sidebar-header .brand-mark { border-radius: 12px; }
+body.theme-newspaper .bottom-bar-controls .sidebar-header .brand-mark { border-radius: 0; }
 
 /* 品牌标识统一采用极客主题的像素语言，用同一组像素笔画替代文字 π。 */
-body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #app-sidebar .sidebar-header .brand-mark {
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) .bottom-bar-controls .sidebar-header .brand-mark {
   position: relative;
   font-size: 0;
 }
-body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #app-sidebar .sidebar-header .brand-mark::before {
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) .bottom-bar-controls .sidebar-header .brand-mark::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -1653,21 +1614,19 @@ body.theme-classic .modal { border-radius: 10px; }
 body.theme-aurora .modal { border-radius: 18px; }
 /* 结构线收口：每个主题保留自己的线型，并在所有区域边界中保持一致。 */
 body:is(.theme-classic, .theme-aurora) .topbar-brand,
-body:is(.theme-classic, .theme-aurora) > .topbar > .workspace-page-header,
+body:is(.theme-classic, .theme-aurora) #workbench-layout > .topbar > .workspace-page-header,
 body:is(.theme-classic, .theme-aurora) .session-header { border-bottom: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) #app-sidebar { border-right: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) #app-sidebar .sidebar-nav { border-bottom: 1px solid var(--line); }
-body:is(.theme-classic, .theme-aurora) #app-sidebar > .sidebar-header { border-top: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) #task-toolbar { border-bottom: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) .task-board-column { border: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) .session-bottom-bar { border-top: 1px solid var(--line); }
 
 body.theme-geek .topbar-brand,
-body.theme-geek > .topbar > .workspace-page-header,
+body.theme-geek #workbench-layout > .topbar > .workspace-page-header,
 body.theme-geek .session-header { border-bottom: 1px dashed var(--line); }
 body.theme-geek #app-sidebar { border-right: 1px dashed var(--line); }
 body.theme-geek #app-sidebar .sidebar-nav { border-bottom: 1px dashed var(--line); }
-body.theme-geek #app-sidebar > .sidebar-header { border-top: 1px dashed var(--line); }
 body.theme-geek #task-toolbar { border-bottom: 1px dashed var(--line); }
 body.theme-geek .task-board-column { border: 1px dashed var(--line); }
 body.theme-geek .session-bottom-bar { border-top: 1px dashed var(--line); }
@@ -1675,11 +1634,11 @@ body.theme-geek .session-bottom-bar { border-top: 1px dashed var(--line); }
 body.theme-geek .topbar-brand .workspace-history-button,
 body.theme-geek .topbar-brand .workspace-module-button,
 body.theme-geek .topbar-brand .sidebar-toggle,
-body.theme-geek #app-sidebar .sidebar-header .workspace-module-button,
-body.theme-geek #app-sidebar .sidebar-header .brand-mark { border-style: dashed; }
+body.theme-geek .bottom-bar-controls .sidebar-header .workspace-module-button,
+body.theme-geek .bottom-bar-controls .sidebar-header .brand-mark { border-style: dashed; }
 body.theme-geek .topbar-brand { border-right: 1px dashed var(--line); }
 body.theme-geek .topbar-brand .sidebar-toggle { background: var(--surface-raised); }
-body.theme-geek #app-sidebar .sidebar-header .brand-mark { background: var(--surface-raised); }
+body.theme-geek .bottom-bar-controls .sidebar-header .brand-mark { background: var(--surface-raised); }
 body.theme-geek .topbar-brand #sidebar-toggle[aria-expanded="false"] { background: var(--accent-soft); }
 body.theme-geek .sidebar-nav-item.active,
 body.theme-geek .session-child-session.active {
@@ -1688,13 +1647,12 @@ body.theme-geek .session-child-session.active {
 }
 
 body.theme-newspaper .topbar-brand,
-body.theme-newspaper > .topbar > .workspace-page-header,
+body.theme-newspaper #workbench-layout > .topbar > .workspace-page-header,
 body.theme-newspaper .session-header { border-bottom: 3px double var(--line-strong); }
 body.theme-newspaper .topbar-brand { border-right: 3px double var(--line-strong); }
 body:is(.theme-classic, .theme-aurora) .topbar-brand { border-right: 1px solid var(--line); }
 body.theme-newspaper #app-sidebar { border-right: 3px double var(--line-strong); }
 body.theme-newspaper #app-sidebar .sidebar-nav { border-bottom: 3px double var(--line-strong); }
-body.theme-newspaper #app-sidebar > .sidebar-header { border-top: 3px double var(--line-strong); }
 body.theme-newspaper #task-toolbar { border-bottom: 3px double var(--line-strong); }
 body.theme-newspaper .task-board-column { border: 3px double var(--line-strong); }
 body.theme-newspaper .session-bottom-bar { border-top: 3px double var(--line-strong); }
@@ -2222,3 +2180,229 @@ body.theme-geek .session-toolbar-intro .session-name-title {
   letter-spacing: 0;
 }
 body.theme-geek .session-toolbar-intro .session-name-title:hover:not(:disabled) { color: var(--accent); }
+
+/* 顶部栏是一个整体：左侧工作区按钮和右侧标题/工具共用一条底部分隔线，
+   只用左侧区域的右边界标出两块功能区。 */
+.topbar {
+  border-bottom: 1px solid var(--line);
+}
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) .topbar-brand,
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench-layout > .topbar > .workspace-page-header,
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench-layout > .topbar > .session-header {
+  border-bottom: 0;
+}
+body.theme-geek .topbar { border-bottom: 1px dashed var(--line); }
+body.theme-newspaper .topbar { border-bottom: 3px double var(--line-strong); }
+
+
+/* 底部栏是一个整体：左侧控制停靠区与右侧便签区共享同一条顶部边界。 */
+.session-bottom-bar {
+  left: 0;
+  padding-left: 0;
+}
+.bottom-bar-controls {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  flex: 0 0 var(--sidebar-width);
+  align-items: center;
+  width: var(--sidebar-width);
+  height: 42px;
+  min-height: 42px;
+  background: var(--note-mask-surface);
+  border-right: 1px solid var(--line);
+}
+.bottom-bar-controls > .sidebar-header {
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  padding: 6px 5px 6px 8px;
+  border: 0;
+  background: transparent;
+}
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) .bottom-bar-controls > .sidebar-header { border-top: 0; }
+body.theme-geek .bottom-bar-controls { border-right-style: dashed; }
+body.theme-newspaper .bottom-bar-controls { border-right: 3px double var(--line-strong); }
+@media (max-width: 760px) {
+  .session-bottom-bar {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .bottom-bar-controls {
+    flex-basis: var(--sidebar-width);
+    width: var(--sidebar-width);
+  }
+}
+
+/* 页面六区使用同一个网格容器：
+   ①左上控制、②顶部标题/工作区、③侧栏、④主工作区、⑤左下控制、⑥右侧便签。
+   只有侧栏自身保留两个直接子区：模块选择区和任务/会话树区。 */
+#workbench-layout {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) 42px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+#workbench-layout > .topbar-brand {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  z-index: 6;
+  align-self: stretch;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: var(--topbar-height);
+  margin: 0;
+  padding: 0 5px 0 8px;
+  overflow: visible;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+#workbench-layout > .topbar {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  top: auto;
+  z-index: 4;
+  width: auto;
+  height: auto;
+  min-height: var(--topbar-height);
+  min-width: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+}
+#workbench-layout > .topbar > .workspace-page-header {
+  height: auto;
+  min-height: var(--topbar-height);
+  overflow: visible;
+}
+#workbench-layout > .topbar > .workspace-page-header > #task-toolbar {
+  border-bottom: 0;
+}
+/* 标题/工作区本身不再单独绘制横线，避免在内容上沿出现黑色边界。 */
+#workbench-layout > .topbar {
+  border-top: 0;
+  border-bottom: 0;
+}
+#workbench-layout > #app-sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  flex: none;
+}
+#workbench-layout > #workspace-main {
+  grid-column: 2;
+  grid-row: 2;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  padding-bottom: 0;
+}
+#workbench-layout > .bottom-bar-controls {
+  grid-column: 1;
+  grid-row: 3;
+  position: relative;
+  z-index: 6;
+  width: auto;
+  height: 42px;
+  min-width: 0;
+  min-height: 42px;
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+#workbench-layout > .session-bottom-bar {
+  grid-column: 2;
+  grid-row: 3;
+  position: relative;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  z-index: 5;
+  width: auto;
+  height: 42px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 16px 0 5px;
+  border-top: 1px solid var(--line);
+}
+#workbench-layout > .session-bottom-bar .session-note-buttons {
+  margin: -1px 0;
+}
+body.session-mode .session-main,
+body:not(.session-mode) #workspace-main { padding-bottom: 0; }
+#workbench-layout:has(#theme-menu:not(.hidden)) > .topbar-brand { z-index: 25; }
+body.sidebar-collapsed #workbench-layout {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+body.sidebar-collapsed #workbench-layout > .topbar,
+body.sidebar-collapsed #workbench-layout > .session-bottom-bar {
+  padding-left: var(--sidebar-width);
+}
+body.sidebar-collapsed #workbench-layout > .topbar-brand,
+body.sidebar-collapsed #workbench-layout > .bottom-bar-controls {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+}
+body.theme-classic #workbench-layout > .topbar-brand { background: color-mix(in srgb, var(--surface-raised) 94%, transparent); }
+body.theme-geek #workbench-layout > .topbar-brand { background: var(--surface); }
+body.theme-aurora #workbench-layout > .topbar-brand { background: color-mix(in srgb, var(--surface) 88%, transparent); }
+body.theme-newspaper #workbench-layout > .topbar-brand { background: var(--surface); }
+body.theme-geek #workbench-layout > .topbar-brand,
+body.theme-geek #workbench-layout > .topbar,
+body.theme-geek #workbench-layout > .bottom-bar-controls,
+body.theme-geek #workbench-layout > .session-bottom-bar { border-bottom-style: dashed; border-top-style: dashed; }
+body.theme-newspaper #workbench-layout > .topbar-brand,
+body.theme-newspaper #workbench-layout > .topbar { border-bottom: 3px double var(--line-strong); }
+body.theme-newspaper #workbench-layout > .bottom-bar-controls,
+body.theme-newspaper #workbench-layout > .session-bottom-bar { border-top: 3px double var(--line-strong); }
+body:is(.theme-classic, .theme-aurora) #workbench-layout > .topbar-brand,
+body:is(.theme-classic, .theme-aurora) #workbench-layout > .topbar,
+body:is(.theme-classic, .theme-aurora) #workbench-layout > .bottom-bar-controls,
+body:is(.theme-classic, .theme-aurora) #workbench-layout > .session-bottom-bar { border-top-style: solid; border-bottom-style: solid; }
+body.theme-geek #workbench-layout > .bottom-bar-controls { background: var(--surface); }
+body.theme-classic #workbench-layout > .bottom-bar-controls { background: var(--surface-raised); }
+body.theme-aurora #workbench-layout > .bottom-bar-controls { background: color-mix(in srgb, var(--surface) 90%, transparent); }
+body.theme-newspaper #workbench-layout > .bottom-bar-controls { background: var(--surface); }
+@media (max-width: 760px) {
+  #workbench-layout {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    grid-template-rows: auto 180px minmax(0, 1fr) 42px;
+  }
+  #workbench-layout > .topbar-brand { grid-column: 1; grid-row: 1; }
+  #workbench-layout > .topbar { grid-column: 2; grid-row: 1; }
+  #workbench-layout > #app-sidebar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: auto;
+    max-height: none;
+    border-right: 0;
+  }
+  #workbench-layout > #workspace-main {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  #workbench-layout > .bottom-bar-controls { grid-column: 1; grid-row: 4; }
+  #workbench-layout > .session-bottom-bar {
+    grid-column: 2;
+    grid-row: 4;
+    padding-left: 5px;
+    padding-right: 12px;
+  }
+  body.sidebar-collapsed #workbench-layout > .session-bottom-bar { padding-left: calc(var(--sidebar-width) + 5px); }
+}
+
+/* 标题/工作区上沿不使用黑色横线；边界由六区网格和下方内容自然分隔。 */
+body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench-layout > .topbar {
+  border-top: 0;
+  border-bottom: 0;
+}
