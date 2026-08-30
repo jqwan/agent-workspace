@@ -119,10 +119,10 @@ function applyTheme(theme) {
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
   const style = THEME_STYLES.includes(localStorage.getItem('workbench-style')) ? localStorage.getItem('workbench-style') : 'classic';
   const themeColors = {
-    classic: { light: '#1e1e1e', dark: '#181818' },
-    'geek-terminal': { light: '#edf7f0', dark: '#070a09' },
-    aurora: { light: '#f5f7ff', dark: '#111322' },
-    newspaper: { light: '#f4f1e8', dark: '#181817' },
+    classic: { light: '#f4f7fb', dark: '#111821' },
+    'geek-terminal': { light: '#edf5ef', dark: '#070b09' },
+    aurora: { light: '#eef1ff', dark: '#0f1224' },
+    newspaper: { light: '#efede6', dark: '#181816' },
   };
   const themeColor = themeColors[style][dark ? 'dark' : 'light'];
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
