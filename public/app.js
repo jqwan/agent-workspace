@@ -486,18 +486,64 @@ function rememberCurrentSessionMessage() {
   const session = currentTask(state.sessionTask)?.sessions?.find((item) => item.id === state.sessionSessionId);
   if (session?.latestMessageId) seenSessionMessageIds.set(sessionMarkerKey(state.sessionTask, state.sessionSessionId), session.latestMessageId);
 }
+function masonryItems(container, selector) {
+  return [...container.children].flatMap((child) => child.classList.contains('masonry-column')
+    ? [...child.children].filter((item) => item.matches(selector))
+    : child.matches(selector) ? [child] : []);
+}
+function arrangeMasonry(container, selector, columns, className) {
+  const items = masonryItems(container, selector);
+  if (!items.length) return;
+  const count = Math.max(1, Math.min(columns, items.length));
+  container.classList.add('is-masonry');
+  container.style.setProperty('--masonry-column-count', String(count));
+  const columnNodes = Array.from({ length: count }, () => {
+    const column = document.createElement('div');
+    column.className = `masonry-column ${className}`;
+    return column;
+  });
+  container.replaceChildren(...columnNodes);
+  const heights = Array(count).fill(0);
+  items.forEach((item) => {
+    const shortest = heights.indexOf(Math.min(...heights));
+    columnNodes[shortest].append(item);
+    heights[shortest] = columnNodes[shortest].getBoundingClientRect().height;
+  });
+}
+function restoreMasonry(container, selector) {
+  const items = masonryItems(container, selector);
+  if (!items.length || !container.querySelector(':scope > .masonry-column')) return;
+  container.classList.remove('is-masonry');
+  container.replaceChildren(...items);
+}
+let masonryLayoutFrame = null;
 function syncMasonryColumns(root = document) {
   const board = root.querySelector('.task-board');
-  if (board && board.clientWidth > 0) {
-    const count = board.querySelectorAll(':scope > .task-board-column').length || 1;
-    const maxColumns = Math.max(1, Math.floor((board.clientWidth + 14) / 374));
-    board.style.columnCount = String(Math.min(count, maxColumns));
-  }
-  root.querySelectorAll('.compact-card-layout .task-board-list').forEach((list) => {
-    if (list.clientWidth <= 0) return;
-    const count = list.querySelectorAll(':scope > .card').length || 1;
-    const maxColumns = Math.max(1, Math.floor((list.clientWidth + 10) / 260));
-    list.style.columnCount = String(Math.min(count, maxColumns));
+  if (!board || board.clientWidth <= 0) return;
+  const boardColumns = Math.max(1, Math.floor((board.clientWidth + 14) / 374));
+
+  // 先放置看板以得到内部列表的最终宽度；下一帧再计算紧凑卡片的列数。
+  arrangeMasonry(board, '.task-board-column', boardColumns, 'board-masonry-column');
+  if (masonryLayoutFrame !== null) cancelAnimationFrame(masonryLayoutFrame);
+  masonryLayoutFrame = requestAnimationFrame(() => {
+    masonryLayoutFrame = null;
+    const currentBoard = root.querySelector('.task-board');
+    if (!currentBoard || currentBoard.clientWidth <= 0) return;
+    const currentBoardColumns = Math.max(1, Math.floor((currentBoard.clientWidth + 14) / 374));
+    const compact = currentBoard.classList.contains('compact-card-layout');
+    currentBoard.querySelectorAll('.task-board-list').forEach((list) => {
+      if (!compact) {
+        restoreMasonry(list, '.card');
+        return;
+      }
+      const cardColumns = Math.max(1, Math.floor((list.clientWidth + 10) / 270));
+      arrangeMasonry(list, '.card', cardColumns, 'card-masonry-column');
+    });
+
+    // 卡片分列会改变看板高度，最后按新的真实高度再平衡一次外层瀑布流。
+    if (masonryItems(currentBoard, '.task-board-column').length > 1) {
+      arrangeMasonry(currentBoard, '.task-board-column', currentBoardColumns, 'board-masonry-column');
+    }
   });
 }
 const titleAnimations = new WeakMap();
@@ -700,8 +746,22 @@ const NOTE_CATEGORY_GROUPS = [
   { label: '会话标记', match: (note) => note.pinnedToSessionBar && !note.pinnedToTopBar },
   { label: '提醒标记 + 会话标记', match: (note) => note.pinnedToTopBar && note.pinnedToSessionBar },
 ];
+function colorGroups(items, itemValue = (item) => item) {
+  return Object.entries(colorCatalog()).map(([key, value]) => ({
+    label: value.label,
+    colorKey: key,
+    colorValue: value.value,
+    customColor: Boolean(customColors[key]),
+    items: items.filter((item) => taskColor(itemValue(item)) === key),
+  })).filter((group) => group.items.length > 0);
+}
+function boardGroupBadge(group) {
+  const colorClass = group.colorKey ? ` color-group-badge color-${group.colorKey}${group.customColor ? ' custom-color' : ''}` : '';
+  const colorStyle = group.customColor ? ` style="--task-color:${esc(group.colorValue)}"` : '';
+  return `<span class="badge ${group.badgeClass || 'board-group-badge'}${colorClass}"${colorStyle} title="${esc(group.label)}">${esc(group.label)}</span>`;
+}
 function noteGroups(notes) {
-  if (state.boardGroup === 'color') return Object.entries(colorCatalog()).map(([key, value]) => ({ label: value.label, items: notes.filter((note) => taskColor(note) === key) })).filter((group) => group.items.length > 0);
+  if (state.boardGroup === 'color') return colorGroups(notes);
   if (state.boardGroup === 'noteCategory') return NOTE_CATEGORY_GROUPS.map((group) => ({ label: group.label, items: notes.filter(group.match) })).filter((group) => group.items.length > 0);
   return [{ label: '便签', items: notes }];
 }
@@ -712,12 +772,12 @@ function renderNotesList() {
   const groups = noteGroups(notes);
   const compact = state.boardCardLayout === 'compact';
   const empty = `<div class="task-board-empty"><strong>${state.search ? '没有匹配的便签' : '还没有便签'}</strong><p>${state.search ? '试试调整搜索词。' : '创建一张便签，记录临时想法。'}</p>${state.search ? '<button type="button" data-action="clear-note-filters">清除搜索</button>' : ''}</div>`;
-  const board = notes.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head"><span class="badge board-group-badge" title="${esc(group.label)}">${esc(group.label)}</span><b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((note) => noteCard(note, compact)).join('')}</div></section>`).join('') : empty;
+  const board = notes.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head">${boardGroupBadge(group)}<b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((note) => noteCard(note, compact)).join('')}</div></section>`).join('') : empty;
   $('#task-list').innerHTML = `<div class="task-board${compact ? ' compact-card-layout' : ''}">${board}</div>`;
   syncMasonryColumns($('#task-list')); syncOverflowTooltips($('#task-list'));
 }
 function archivedGroups(items) {
-  if (state.boardGroup === 'color') return Object.entries(colorCatalog()).map(([key, value]) => ({ label: value.label, items: items.filter((item) => taskColor(item.value) === key) })).filter((group) => group.items.length > 0);
+  if (state.boardGroup === 'color') return colorGroups(items, (item) => item.value);
   if (state.archiveType === 'all' && state.boardGroup === 'kind') return [
     { label: '任务', items: items.filter((item) => item.kind === 'task') },
     { label: '便签', items: items.filter((item) => item.kind === 'note') },
@@ -746,7 +806,7 @@ function renderArchivedList() {
   ].sort((a, b) => new Date(b.value.updatedAt) - new Date(a.value.updatedAt));
   const groups = archivedGroups(items);
   const compact = state.boardCardLayout === 'compact';
-  const board = items.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head"><span class="badge board-group-badge">${esc(group.label)}</span><b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((item) => item.kind === 'task' ? card(item.value, compact) : noteCard(item.value, compact)).join('')}</div></section>`).join('') : '<div class="task-board-empty"><strong>回收站为空</strong></div>';
+  const board = items.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head">${boardGroupBadge(group)}<b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((item) => item.kind === 'task' ? card(item.value, compact) : noteCard(item.value, compact)).join('')}</div></section>`).join('') : '<div class="task-board-empty"><strong>回收站为空</strong></div>';
   $('#task-list').innerHTML = `<div class="task-board${compact ? ' compact-card-layout' : ''}">${board}</div>`;
   syncMasonryColumns($('#task-list')); syncOverflowTooltips($('#task-list'));
 }
@@ -787,7 +847,7 @@ function boardGroups(tasks) {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, 'zh-CN')).map(([label, items]) => ({ label, items }));
   }
   if (state.boardGroup === 'color') {
-    return Object.entries(colorCatalog()).map(([key, value]) => ({ label: value.label, items: tasks.filter((task) => taskColor(task) === key) })).filter((group) => group.items.length > 0);
+    return colorGroups(tasks);
   }
   if (state.boardGroup === 'status' && !state.status) {
     return Object.keys(STATUS).map((key) => ({ label: STATUS[key].label, badgeClass: key, items: tasks.filter((task) => task.status === key) })).filter((group) => group.items.length > 0);
@@ -809,7 +869,7 @@ function renderList() {
   const clearArchived = state.status === 'archived' && tasks.length ? '<div class="archive-actions"><button type="button" class="danger" data-action="purge-archived">全部清空</button></div>' : '';
   const hasFilters = Boolean(state.search || state.status);
   const emptyState = `<div class="task-board-empty"><strong>${hasFilters ? '没有匹配的任务' : '还没有任务'}</strong><p>${hasFilters ? '试试调整搜索词或清除筛选条件。' : '创建一个任务，开始你的下一次执行。'}</p>${hasFilters ? '<button type="button" data-action="clear-filters">清除筛选</button>' : ''}</div>`;
-  const board = groups.length && tasks.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head"><span class="badge ${group.badgeClass || 'board-group-badge'}" title="${esc(group.label)}">${esc(group.label)}</span><b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((task) => card(task, compact)).join('') || '<div class="task-board-empty">暂无任务</div>'}</div></section>`).join('') : emptyState;
+  const board = groups.length && tasks.length ? groups.map((group) => `<section class="task-board-column"><header class="task-board-head">${boardGroupBadge(group)}<b>${number(group.items.length)}</b></header><div class="task-board-list">${group.items.map((task) => card(task, compact)).join('') || '<div class="task-board-empty">暂无任务</div>'}</div></section>`).join('') : emptyState;
   $('#task-list').innerHTML = clearArchived + `<div class="task-board${compact ? ' compact-card-layout' : ''}">${board}</div>`;
   syncMasonryColumns($('#task-list'));
   syncOverflowTooltips($('#task-list'));
