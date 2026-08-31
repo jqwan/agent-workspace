@@ -2416,7 +2416,8 @@ body.theme-newspaper #workbench-layout > .bottom-bar-controls { background: var(
   body:not(.sidebar-collapsed) #workbench-layout::before { display: none; }
   #workbench-layout {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-    grid-template-rows: auto 180px minmax(0, 1fr) 42px;
+    --mobile-sidebar-height: clamp(96px, calc(var(--app-viewport-height, 100dvh) * .3), 180px);
+    grid-template-rows: auto var(--mobile-sidebar-height) minmax(0, 1fr) 42px;
   }
   #workbench-layout > .topbar-brand { grid-column: 1; grid-row: 1; }
   #workbench-layout > .topbar { grid-column: 2; grid-row: 1; }
@@ -2444,6 +2445,17 @@ body.theme-newspaper #workbench-layout > .bottom-bar-controls { background: var(
     padding-right: 7px;
   }
   body.sidebar-collapsed #workbench-layout > .session-bottom-bar { padding-left: calc(var(--sidebar-width) + 7px); }
+}
+
+/* 窄屏折叠侧栏不应继续占用中间的垂直空间；左上/左下控制区仍由网格外观规则保留。 */
+@media (max-width: 760px) {
+  body.sidebar-collapsed #workbench-layout {
+    grid-template-rows: auto 0 minmax(0, 1fr) 42px;
+  }
+  body.sidebar-collapsed #workbench-layout > #app-sidebar {
+    height: 0;
+    min-height: 0;
+  }
 }
 
 /* 顶部命令带与主工作区是一级边界；四种主题沿用各自的结构线型。 */
