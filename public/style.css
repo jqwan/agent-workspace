@@ -202,6 +202,7 @@ h1, h2, h3 { text-wrap: balance; }
   box-shadow: var(--shadow);
 }
 .display-settings-menu {
+  --submenu-boundary-offset: 7px;
   position: absolute;
   top: calc(100% + 5px);
   left: 4px;
@@ -228,7 +229,7 @@ h1, h2, h3 { text-wrap: balance; }
 .display-settings-submenu {
   position: absolute;
   top: -6px;
-  left: 100%;
+  left: calc(100% + var(--submenu-boundary-offset));
   display: none;
   width: 192px;
   padding: 6px;
@@ -753,7 +754,7 @@ body.theme-dark .modal input[aria-invalid="true"], body:not(.theme-light) .modal
 .toast.out { opacity: 0; transform: translateY(-4px); transition: opacity .3s ease, transform .3s ease; }
 
 /* Native TUI workspace */
-body.session-mode { overflow: hidden; background: var(--terminal); }
+body.session-mode { overflow: hidden; background: var(--bg); }
 body.session-mode #workspace-shell { height: calc(var(--app-viewport-height, 100dvh) - var(--topbar-height)); min-height: 0; }
 body.session-mode #workspace-main { height: 100%; display: flex; min-height: 0; background-image: none; }
 body.session-mode #session-view { height: 100%; flex: 1; min-height: 0; }
@@ -894,7 +895,7 @@ button.session-context-icon:hover:not(:disabled) { border-color: transparent; co
 button.session-context-icon:disabled { opacity: .52; cursor: default; }
 .session-context-copy { position: relative; min-width: 0; }
 .session-title-row { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
-.session-action-menu { position: absolute; top: calc(100% + 9px); right: 0; z-index: 9; display: grid; gap: 2px; min-width: 190px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); box-shadow: var(--shadow); }
+.session-action-menu { --submenu-boundary-offset: 7px; position: absolute; top: calc(100% + 9px); right: 0; z-index: 9; display: grid; gap: 2px; min-width: 190px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); box-shadow: var(--shadow); }
 .session-action-menu button { width: 100%; padding: 8px 10px; border: 0; background: transparent; color: var(--ink); font-size: 12px; text-align: left; white-space: nowrap; }
 .session-action-menu button:hover:not(:disabled), .session-action-menu button:focus-visible { border-color: transparent; background: var(--accent-soft); color: var(--accent-strong); outline: none; }
 .session-action-menu button:disabled { opacity: .45; cursor: not-allowed; }
@@ -906,7 +907,7 @@ button.session-context-icon:disabled { opacity: .52; cursor: default; }
 .session-action-submenu {
   position: absolute;
   top: -6px;
-  left: 100%;
+  left: calc(100% + var(--submenu-boundary-offset));
   z-index: 10;
   display: none;
   min-width: 160px;
@@ -918,6 +919,19 @@ button.session-context-icon:disabled { opacity: .52; cursor: default; }
 }
 .session-action-submenu-wrap:hover > .session-action-submenu,
 .session-action-submenu-wrap:focus-within > .session-action-submenu { display: grid; gap: 2px; }
+
+/* 通用二级浮窗：新交互只需给包裹项加 menu-submenu-wrap、给浮窗加 menu-submenu。 */
+.menu-submenu-wrap { position: relative; }
+.menu-submenu-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 100%;
+  width: var(--submenu-boundary-offset, 7px);
+  height: 100%;
+}
+.menu-submenu { left: calc(100% + var(--submenu-boundary-offset, 7px)); }
+
 .session-title-row .session-name-title { min-width: 0; flex: 1 1 auto; }
 .session-title-row .session-file-copy { flex: 0 0 auto; }
 .session-file-row { display: flex; align-items: center; gap: 4px; max-width: 520px; margin-top: 5px; }
@@ -1146,7 +1160,7 @@ body {
 /* 便签：网页底部与提醒流。 */
 .session-note-buttons { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: min(30vw, 260px); overflow-x: auto; padding: 1px; margin: -1px; scrollbar-width: none; }
 .session-note-buttons::-webkit-scrollbar { display: none; }
-.note-button { position: relative; display: grid; flex: 0 0 28px; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 7px; border-color: var(--line-strong); color: var(--ink); font-size: 13px; font-weight: 800; line-height: 1; }
+.note-button { position: relative; display: grid; flex: 0 0 28px; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 7px; border-color: var(--line-strong); color: var(--ink); font-size: 12px; font-weight: 800; line-height: 1; }
 .note-initial { display: inline-flex; align-items: baseline; justify-content: center; line-height: 1; }
 .note-initial-primary { font-size: 1em; font-weight: 800; }
 .note-initial-secondary { margin-left: -1px; font-size: 1em; font-weight: 800; }
@@ -1181,7 +1195,7 @@ body {
 .session-bottom-bar .session-note-buttons > .topbar-note-panel { z-index: 5; }
 .session-bottom-bar .topbar-note-panel { top: auto; right: auto; bottom: calc(100% + 9px); left: 0; width: min(420px, calc(100vw - 30px)); }
 #toast-root.notification-empty { flex: 0 0 0; min-width: 0; }.note-marquee.empty { display: none; }
-.note-marquee { position: absolute; /* 提醒流只保留文字，进入和离开消息槽时由遮罩渐隐。 */ top: 50%; right: 0; z-index: 0; display: flex; align-items: center; width: 100%; min-width: 0; overflow: hidden; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); box-shadow: none; font-size: 14px; line-height: 1.55; pointer-events: auto; transform: translateY(-50%); -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 6%, #000 94%, transparent 100%); mask-image: linear-gradient(to right, transparent 0%, #000 6%, #000 94%, transparent 100%); }
+.note-marquee { position: absolute; /* 提醒流只保留文字，进入和离开消息槽时由遮罩渐隐。 */ top: 50%; right: 0; z-index: 0; display: flex; align-items: center; width: 100%; min-width: 0; overflow: hidden; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); box-shadow: none; font-size: 12px; line-height: 1.55; pointer-events: auto; transform: translateY(-50%); -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 6%, #000 94%, transparent 100%); mask-image: linear-gradient(to right, transparent 0%, #000 6%, #000 94%, transparent 100%); }
 #toast-root .toast { position: relative; z-index: 1; }
 .note-marquee-track { display: flex; align-items: center; gap: 28px; width: max-content; min-width: 0; padding: 0; text-align: left; white-space: nowrap; will-change: transform; backface-visibility: hidden; transform: translate3d(0, 0, 0); animation: none; }.note-marquee-item { display: block; flex: 0 0 auto; }.note-marquee-track.empty { animation: none; transform: none; text-align: center; }
 .note-marquee-track.notice-text { display: block; width: 100%; }
@@ -1776,6 +1790,10 @@ body.theme-geek .topbar > .workspace-page-header .toolbar-intro h1 { font-size: 
   min-width: 0;
   height: 32px;
 }
+#workspace-page-header > #task-toolbar .board-search-field input,
+.terminal-search input { font-size: 12px; }
+#workspace-page-header > #task-toolbar .board-search-field input::placeholder,
+.terminal-search input::placeholder { font-size: 12px; }
 #workspace-page-header > #task-toolbar .toolbar-controls {
   flex: 0 0 auto;
   width: auto;
@@ -1900,34 +1918,34 @@ body.theme-classic {
 }
 body.theme-classic.theme-dark {
   color-scheme: dark;
-  --bg: #111821;
-  --surface: #19232e;
-  --surface-raised: #202c39;
-  --surface-muted: #273746;
-  --line: #354757;
-  --line-strong: #52697c;
-  --ink: #e8f0f8;
-  --muted: #9aabba;
-  --accent: #67adff;
-  --accent-strong: #8bc1ff;
-  --accent-soft: #1e3b5b;
+  --bg: #1f1f1f;
+  --surface: #262626;
+  --surface-raised: #2f2f2f;
+  --surface-muted: #393939;
+  --line: #4a4a4a;
+  --line-strong: #666666;
+  --ink: #ededed;
+  --muted: #aaaaaa;
+  --accent: #7da7d9;
+  --accent-strong: #a9c9ed;
+  --accent-soft: #2c3b4d;
   --teal: #5cd1bd;
   --danger: #ff968b;
-  --terminal: #0d131a;
+  --terminal: #1f1f1f;
   --terminal-ink: #dce8f4;
-  --terminal-muted: #8799ac;
-  --terminal-accent: #67adff;
-  --terminal-selection: #234c76;
-  --shadow: 0 8px 24px rgba(0, 0, 0, .26);
+  --terminal-muted: #aaaaaa;
+  --terminal-accent: #7da7d9;
+  --terminal-selection: #3b4d66;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .32);
 }
 @media (prefers-color-scheme: dark) {
   body.theme-classic:not(.theme-light) {
     color-scheme: dark;
-    --bg: #111821; --surface: #19232e; --surface-raised: #202c39; --surface-muted: #273746;
-    --line: #354757; --line-strong: #52697c; --ink: #e8f0f8; --muted: #9aabba;
-    --accent: #67adff; --accent-strong: #8bc1ff; --accent-soft: #1e3b5b; --teal: #5cd1bd;
-    --danger: #ff968b; --terminal: #0d131a; --terminal-ink: #dce8f4; --terminal-muted: #8799ac;
-    --terminal-accent: #67adff; --terminal-selection: #234c76; --shadow: 0 8px 24px rgba(0,0,0,.26);
+    --bg: #1f1f1f; --surface: #262626; --surface-raised: #2f2f2f; --surface-muted: #393939;
+    --line: #4a4a4a; --line-strong: #666666; --ink: #ededed; --muted: #aaaaaa;
+    --accent: #7da7d9; --accent-strong: #a9c9ed; --accent-soft: #2c3b4d; --teal: #5cd1bd;
+    --danger: #ff968b; --terminal: #1f1f1f; --terminal-ink: #dce8f4; --terminal-muted: #aaaaaa;
+    --terminal-accent: #7da7d9; --terminal-selection: #3b4d66; --shadow: 0 8px 24px rgba(0,0,0,.32);
   }
 }
 body.theme-classic #workspace-main { background: var(--bg); background-image: linear-gradient(var(--surface-muted) 1px, transparent 1px), linear-gradient(90deg, var(--surface-muted) 1px, transparent 1px); background-size: 32px 32px; background-blend-mode: soft-light; }
@@ -3087,6 +3105,7 @@ body:is(.theme-classic, .theme-geek, .theme-aurora, .theme-newspaper) #workbench
   #workbench-layout > .topbar-brand,
   #workbench-layout > .bottom-bar-controls > .sidebar-header { gap: 3px; }
   .display-settings-menu { left: 4px; width: min(142px, calc(100vw - 20px)); }
+  .display-settings-item.menu-submenu-wrap::after { top: 100%; left: 0; width: 100%; height: 3px; }
   .display-settings-submenu { left: 0; top: calc(100% + 3px); width: min(192px, calc(100vw - 20px)); }
   .session-tree-tool-panel { left: 7px; right: 7px; width: auto; }
   .session-tree-sort-menu { width: auto; }
@@ -3098,6 +3117,9 @@ body.theme-classic .display-settings-submenu { border-radius: 9px; box-shadow: v
 body.theme-geek .display-settings-menu,
 body.theme-geek .display-settings-submenu { border-style: dashed; border-radius: 1px; box-shadow: none; }
 body.theme-aurora .display-settings-menu,
-body.theme-aurora .display-settings-submenu { border-radius: 13px; background: color-mix(in srgb, var(--surface-raised) 86%, transparent); box-shadow: 0 16px 36px color-mix(in srgb, var(--accent) 18%, transparent); backdrop-filter: blur(18px); }
+body.theme-aurora .display-settings-submenu { border-radius: 13px; background: var(--surface-raised); box-shadow: var(--shadow); backdrop-filter: none; }
 body.theme-newspaper .display-settings-menu,
 body.theme-newspaper .display-settings-submenu { border: 3px double var(--line-strong); border-radius: 0; box-shadow: none; }
+body.theme-newspaper .display-settings-menu,
+body.theme-newspaper .session-action-menu,
+body.theme-newspaper .menu-submenu-wrap { --submenu-boundary-offset: 9px; }

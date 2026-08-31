@@ -1406,7 +1406,8 @@ function terminalFontFamily() {
 function terminalTheme() {
   const styles = getComputedStyle(document.body);
   const cssVar = (name, fallback) => styles.getPropertyValue(name).trim() || styles.getPropertyValue(fallback).trim();
-  const background = cssVar('--terminal', '--bg');
+  // 终端与工作区使用同一主题底色，避免切换主题后出现色差。
+  const background = cssVar('--bg', '--terminal');
   const foreground = cssVar('--terminal-ink', '--ink');
   const muted = cssVar('--terminal-muted', '--muted');
   const accent = cssVar('--terminal-accent', '--accent');
@@ -2612,7 +2613,8 @@ function searchTerminal(previous = false) {
   const found = previous
     ? terminalSearchAddon.findPrevious(term)
     : terminalSearchAddon.findNext(term);
-  if (results) { results.textContent = found ? '' : '未找到'; results.hidden = Boolean(found); }
+  // 未找到时不在顶部工具栏额外占位显示提示，搜索结果仍由 xterm 的高亮反馈。
+  if (results) { results.textContent = ''; results.hidden = true; }
 }
 $('#terminal-search-results').hidden = true;
 $('#session-task-select').onchange = (event) => selectSession(event.target.value);
