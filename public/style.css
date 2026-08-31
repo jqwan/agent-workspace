@@ -1624,7 +1624,6 @@ body.theme-classic .modal { border-radius: 10px; }
 body.theme-aurora .modal { border-radius: 18px; }
 /* 结构线收口：每个主题保留自己的线型，并在所有区域边界中保持一致。 */
 body:is(.theme-classic, .theme-aurora) .topbar-brand,
-body:is(.theme-classic, .theme-aurora) #workbench-layout > .topbar > .workspace-page-header,
 body:is(.theme-classic, .theme-aurora) .session-header { border-bottom: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) #app-sidebar { border-right: 1px solid var(--line); }
 body:is(.theme-classic, .theme-aurora) #app-sidebar .sidebar-nav { border-bottom: 1px solid var(--line); }
@@ -1633,7 +1632,6 @@ body:is(.theme-classic, .theme-aurora) .task-board-column { border: 1px solid va
 body:is(.theme-classic, .theme-aurora) .session-bottom-bar { border-top: 1px solid var(--line); }
 
 body.theme-geek .topbar-brand,
-body.theme-geek #workbench-layout > .topbar > .workspace-page-header,
 body.theme-geek .session-header { border-bottom: 1px dashed var(--line); }
 body.theme-geek #app-sidebar { border-right: 1px dashed var(--line); }
 body.theme-geek #app-sidebar .sidebar-nav { border-bottom: 1px dashed var(--line); }
@@ -1657,13 +1655,11 @@ body.theme-geek .session-child-session.active {
 }
 
 body.theme-newspaper .topbar-brand,
-body.theme-newspaper #workbench-layout > .topbar > .workspace-page-header,
 body.theme-newspaper .session-header { border-bottom: 3px double var(--line-strong); }
 body.theme-newspaper .topbar-brand { border-right: 3px double var(--line-strong); }
 body:is(.theme-classic, .theme-aurora) .topbar-brand { border-right: 1px solid var(--line); }
 body.theme-newspaper #app-sidebar { border-right: 3px double var(--line-strong); }
 body.theme-newspaper #app-sidebar .sidebar-nav { border-bottom: 3px double var(--line-strong); }
-body.theme-newspaper #task-toolbar { border-bottom: 3px double var(--line-strong); }
 body.theme-newspaper .task-board-column { border: 3px double var(--line-strong); }
 body.theme-newspaper .session-bottom-bar { border-top: 3px double var(--line-strong); }
 
@@ -2109,7 +2105,7 @@ body.theme-newspaper .topbar { background: var(--surface); border-bottom: 0; bac
 body.theme-newspaper .brand-mark { width: 30px; height: 30px; border: 2px solid var(--accent); border-radius: 50%; background: transparent; color: var(--accent); box-shadow: none; }
 /* 报刊主题的左上角品牌图标改用方形外框，与报刊排版风格一致；左下角本就为方形，保持原样。 */
 body.theme-newspaper #workbench-layout > .topbar-brand .brand-mark { border-radius: 0; }
-body.theme-newspaper #task-toolbar { background: var(--surface); border-bottom: 3px double var(--line-strong); }
+body.theme-newspaper #task-toolbar { background: var(--surface); }
 body.theme-newspaper .toolbar-controls, body.theme-newspaper .board-filter-tabs { border-radius: 0; background: var(--surface); box-shadow: none; }
 body.theme-newspaper .sidebar-nav-item.active { border-color: var(--line-strong); background: var(--accent-soft); color: var(--accent-strong); }
 body.theme-newspaper .task-board-column { border: 0; border-top: 3px double var(--line-strong); border-bottom: 3px double var(--line-strong); border-radius: 0; background: transparent; }

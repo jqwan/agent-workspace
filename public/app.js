@@ -505,7 +505,7 @@ function renderSessionNoteButtons() {
   if (!root) return;
   closeSessionNoteMenu();
   const notes = orderedPinnedNotes('pinnedToSessionBar', 'sessionOrder');
-  root.innerHTML = `${notes.map((note) => `<button type="button" class="note-button session-note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-session-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="session" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="选择发送方式">${noteInitialMarkup(note)}</button>`).join('')}<button type="button" class="note-button note-add-button" data-new-session-note aria-label="新建会话便签" title="新建会话便签">＋</button>`;
+  root.innerHTML = `${notes.map((note) => `<button type="button" class="note-button session-note-button color-${taskColor(note)}${customColors[taskColor(note)] ? ' custom-color' : ''}"${customColorStyle(taskColor(note))} data-session-note="${esc(note.id)}" data-note-id="${esc(note.id)}" data-note-placement="session" aria-label="${esc(noteLabel(note))}" aria-haspopup="menu" aria-expanded="false" title="${esc(noteLabel(note))}">${noteInitialMarkup(note)}</button>`).join('')}<button type="button" class="note-button note-add-button" data-new-session-note aria-label="新建会话便签" title="新建会话便签">＋</button>`;
 }
 function sessionMarkerKey(taskId, sessionId) { return `${taskId}\u0000${sessionId}`; }
 function rememberCurrentSessionMessage() {
