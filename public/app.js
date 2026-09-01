@@ -142,9 +142,9 @@ function applyTheme(theme) {
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
   const style = THEME_STYLES.includes(localStorage.getItem('workbench-style')) ? localStorage.getItem('workbench-style') : 'classic';
   const themeColors = {
-    classic: { light: '#f4f7fb', dark: '#111821' },
+    classic: { light: '#f6f6f6', dark: '#111821' },
     'geek-terminal': { light: '#edf5ef', dark: '#070b09' },
-    aurora: { light: '#eef1ff', dark: '#0f1224' },
+    aurora: { light: '#f7f1ff', dark: '#0f1224' },
     newspaper: { light: '#efede6', dark: '#181816' },
   };
   const themeColor = themeColors[style][dark ? 'dark' : 'light'];
@@ -1405,13 +1405,13 @@ function terminalFontFamily() {
 }
 function terminalTheme() {
   const styles = getComputedStyle(document.body);
-  const cssVar = (name, fallback) => styles.getPropertyValue(name).trim() || styles.getPropertyValue(fallback).trim();
+  const cssVar = (name) => styles.getPropertyValue(name).trim();
   // 终端与工作区使用同一主题底色，避免切换主题后出现色差。
-  const background = cssVar('--bg', '--terminal');
-  const foreground = cssVar('--terminal-ink', '--ink');
-  const muted = cssVar('--terminal-muted', '--muted');
-  const accent = cssVar('--terminal-accent', '--accent');
-  const selectionBackground = cssVar('--terminal-selection', '--accent-soft');
+  const background = cssVar('--bg');
+  const foreground = cssVar('--terminal-ink') || cssVar('--ink');
+  const muted = cssVar('--terminal-muted') || cssVar('--muted');
+  const accent = cssVar('--terminal-accent') || cssVar('--accent');
+  const selectionBackground = cssVar('--terminal-selection') || cssVar('--accent-soft');
   const dark = isTerminalDark();
   let theme = 'classic';
   if (document.body.classList.contains('theme-geek')) theme = 'geek';

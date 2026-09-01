@@ -3,12 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f4f7fb">
+  <meta name="theme-color" content="#f6f6f6">
   <title>Agent 工作台 · 本机 AI</title>
-  <link rel="stylesheet" href="style.css?v=session-marker-svg-526">
+  <link rel="stylesheet" href="style.css?v=terminal-token-cleanup-537">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
+  <script>
+    // 在首帧绘制前恢复主题，避免 app.js 模块加载期间短暂显示 :root 的旧橙色配色。
+    (() => {
+      const styleClasses = {
+        classic: 'theme-classic',
+        geek: 'theme-geek',
+        'geek-terminal': 'theme-geek',
+        aurora: 'theme-aurora',
+        newspaper: 'theme-newspaper',
+      };
+      const style = localStorage.getItem('workbench-style');
+      document.body.classList.add(styleClasses[style] || 'theme-classic');
+      const mode = localStorage.getItem('workbench-theme');
+      if (mode === 'light') document.body.classList.add('theme-light');
+      if (mode === 'dark') document.body.classList.add('theme-dark');
+      const dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    })();
+  </script>
   <a class="skip-link" href="#workspace-main">跳转到主要内容</a>
   <div id="workbench-layout">
     <div class="topbar-brand" aria-label="Agent 工作台"><span class="brand-mark" aria-hidden="true">π</span><div id="workspace-history-controls" class="workspace-history-controls" role="group" aria-label="界面导航"><button id="workspace-back" class="workspace-history-button" type="button" title="返回（Alt+←）" aria-label="返回上一个界面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg></button><button id="workspace-forward" class="workspace-history-button" type="button" title="前进（Alt+→）" aria-label="前进到下一个界面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div><button id="display-settings-toggle" class="sidebar-theme-button workspace-module-button" type="button" title="显示设置" aria-label="显示设置" aria-expanded="false" aria-controls="display-settings-menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M5 12h14M5 17.5h14"/><circle cx="9" cy="6.5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="11" cy="17.5" r="1.5"/></svg></button><button id="archive-toggle" class="sidebar-theme-button workspace-module-button" type="button" title="回收站" aria-label="回收站"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5h6v2"/><path d="M7 8h10l-1 12H8L7 8Z"/><path d="M10 11v6M14 11v6"/></svg></button><button id="sidebar-toggle" class="sidebar-toggle workspace-module-button" type="button" title="收起侧边栏" aria-label="收起侧边栏"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="3"/><path class="sidebar-toggle-line" d="M9 3v18"/></svg></button><div id="display-settings-menu" class="display-settings-menu hidden" role="menu" aria-label="显示设置"><div class="display-settings-item menu-submenu-wrap"><button type="button" role="menuitem" aria-haspopup="menu">主题<span aria-hidden="true">›</span></button><div class="display-settings-submenu menu-submenu" role="menu" aria-label="主题"><button type="button" class="theme-menu-option" role="menuitemradio" data-theme-style="classic" aria-checked="false">默认</button><button type="button" class="theme-menu-option" role="menuitemradio" data-theme-style="geek-terminal" aria-checked="false">极客</button><button type="button" class="theme-menu-option" role="menuitemradio" data-theme-style="aurora" aria-checked="false">极光</button><button type="button" class="theme-menu-option" role="menuitemradio" data-theme-style="newspaper" aria-checked="false">报刊</button></div></div><div class="display-settings-item menu-submenu-wrap"><button type="button" role="menuitem" aria-haspopup="menu">显示模式<span aria-hidden="true">›</span></button><div class="display-settings-submenu menu-submenu" role="menu" aria-label="显示模式"><button type="button" class="theme-menu-option" role="menuitemradio" data-display-mode="system" aria-checked="false">跟随系统</button><button type="button" class="theme-menu-option" role="menuitemradio" data-display-mode="light" aria-checked="false">亮色模式</button><button type="button" class="theme-menu-option" role="menuitemradio" data-display-mode="dark" aria-checked="false">暗色模式</button></div></div></div></div>
@@ -38,6 +57,6 @@
     </div>
     <footer class="session-bottom-bar">
 <div id="session-note-buttons" class="session-note-buttons" aria-label="会话便签"></div><div id="topbar-note-buttons" class="session-note-buttons topbar-note-buttons" aria-label="提醒便签"></div><div id="toast-root" role="status" aria-live="polite" aria-atomic="true"><div id="note-marquee" class="note-marquee" aria-label="通知消息框" aria-hidden="true"></div></div></footer></div><div id="modal-root"></div>
-  <script type="module" src="app.js?v=task-create-session-option-527"></script>
+  <script type="module" src="app.js?v=terminal-token-cleanup-538"></script>
 </body>
 </html>
