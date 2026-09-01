@@ -1243,7 +1243,7 @@ function syncSessionTreeUnread(tasks) {
       const marker = sessionTreeMarker(session, unread);
       const favoriteButton = row.querySelector('.child-favorite');
       if (favoriteButton) {
-        favoriteButton.textContent = marker.icon;
+        favoriteButton.innerHTML = marker.icon;
         favoriteButton.classList.toggle('favorite', Boolean(session.favorite));
         favoriteButton.classList.toggle('unread', unread > 0);
         favoriteButton.title = marker.actionLabel;
@@ -1257,9 +1257,9 @@ function syncSessionTreeUnread(tasks) {
 function sessionTreeMarker(session, unread) {
   const hasUnread = unread > 0;
   const favorite = Boolean(session.favorite);
-  let icon = '○';
-  if (favorite) icon = hasUnread ? '★' : '☆';
-  else if (hasUnread) icon = '●';
+  const icon = favorite
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="session-marker-${hasUnread ? 'filled' : 'outline'}" d="M12 3.5 14.63 8.83l5.88.85-4.25 4.14 1 5.85L12 16.91l-5.26 2.76 1-5.85-4.25-4.14 5.88-.85L12 3.5Z"/></svg>`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="session-marker-${hasUnread ? 'filled' : 'outline'}" cx="12" cy="12" r="6.5"/></svg>`;
   const action = favorite ? '取消收藏会话' : '收藏会话';
   const unreadText = hasUnread ? `${unread > 99 ? '99+' : unread}条未读消息` : '无未读消息';
   return { icon, actionLabel: `${action}，${unreadText}` };
@@ -1812,11 +1812,12 @@ function openDeleteNoteModal(note) {
 }
 function openTaskForm(task = null, options = {}) {
   const openSessionAfterCreate = Boolean(options.openSessionAfterCreate && !task);
-  const saveLabel = task ? '保存' : openSessionAfterCreate ? '确认并进入终端' : '创建';
+  const saveLabel = task ? '保存' : '确认';
+  const openSessionOption = task ? '' : `<label class="note-switch"><input id="task-open-session" type="checkbox"${openSessionAfterCreate ? ' checked' : ''}> 创建后打开新会话</label>`;
   const workingDirEditable = true;
   const workingDirHint = task ? '（仅新会话使用此路径）' : '';
   const workingDirReadonly = workingDirEditable ? '' : ' disabled';
-  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label for="task-working-dir">工作目录${workingDirHint}<div class="path-picker-row"><div class="working-dir-field"><input id="task-working-dir" name="workingDir" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list" value="${esc(task?.workingDir || '')}"${workingDirReadonly}><div id="recent-task-dir-list" class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" id="choose-task-dir" class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button></div><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div><div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label for="task-working-dir">工作目录${workingDirHint}<div class="path-picker-row"><div class="working-dir-field"><input id="task-working-dir" name="workingDir" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list" value="${esc(task?.workingDir || '')}"${workingDirReadonly}><div id="recent-task-dir-list" class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" id="choose-task-dir" class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button></div><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div>${openSessionOption}<div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   const colorPicker = $('#color-picker', form);
   const colorTrigger = $('#color-trigger', form);
@@ -1925,13 +1926,13 @@ function openTaskForm(task = null, options = {}) {
       if (!title) { setFieldError(form, 'task-title', '请输入任务标题。'); $('#task-title', form).focus(); return; }
       if (workingDirEditable && !workingDir) { setFieldError(form, 'task-working-dir', '请选择或输入工作目录。'); $('#task-working-dir', form).focus(); return; }
       button.disabled = true;
-      button.textContent = task ? '保存中…' : '创建中…';
+      button.textContent = task ? '保存中…' : '确认中…';
       if (workingDirEditable) rememberWorkingDir(workingDir);
       const body = { title, description: $('#task-desc', form).value, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null, workingDir };
       const result = await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body });
       markCustomColorUsed(body.color);
       closeModal();
-      if (!task && openSessionAfterCreate && result.task) {
+      if (!task && $('#task-open-session', form)?.checked && result.task) {
         await openExecute(result.task);
         return;
       }
@@ -2575,7 +2576,7 @@ $('#archive-toggle').onclick = () => {
   saveLayoutState();
   recordWorkspaceView();
 };
-// 任务入口会在创建后打开首个会话；新建任务本身仍不预建会话。
+// 两个新建任务入口共用同一弹窗；侧栏入口默认打开新会话，工具栏入口默认不打开。
 $('#sidebar-new-task').onclick = () => openTaskForm(null, { openSessionAfterCreate: true });
 $('#sidebar-new-note').onclick = () => openNewBoardItem('notes');
 $('#toolbar-new-item').onclick = () => state.boardType === 'sessions' ? openNewSessionModal() : openNewBoardItem(state.boardType);

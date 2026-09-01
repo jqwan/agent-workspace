@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f7fb">
   <title>Agent 工作台 · 本机 AI</title>
-  <link rel="stylesheet" href="style.css?v=mobile-tui-height-525">
+  <link rel="stylesheet" href="style.css?v=session-marker-svg-526">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
@@ -19,7 +19,7 @@
   </header>
     <aside id="app-sidebar" class="app-sidebar">
       <div class="sidebar-nav" role="tablist" aria-label="内容切换">
-        <div class="sidebar-nav-row"><button id="module-tasks" class="sidebar-nav-item active" type="button" role="tab" aria-label="任务" aria-selected="true" aria-controls="task-list"><span class="module-icon task-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg></span><span>任务</span><b class="module-count" aria-hidden="true">0</b></button><button id="sidebar-new-task" class="sidebar-inline-add" type="button" aria-label="新建任务并进入新会话终端" title="新建任务并进入新会话终端">＋</button></div>
+        <div class="sidebar-nav-row"><button id="module-tasks" class="sidebar-nav-item active" type="button" role="tab" aria-label="任务" aria-selected="true" aria-controls="task-list"><span class="module-icon task-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg></span><span>任务</span><b class="module-count" aria-hidden="true">0</b></button><button id="sidebar-new-task" class="sidebar-inline-add" type="button" aria-label="新建任务" title="新建任务">＋</button></div>
         <div class="sidebar-nav-row"><button id="module-notes" class="sidebar-nav-item" type="button" role="tab" aria-label="便签" aria-selected="false" aria-controls="task-list"><span class="module-icon note-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"/><path d="M15 4v4h4M9 12h6M9 16h4"/></svg></span><span>便签</span><b class="module-count" aria-hidden="true">0</b></button><button id="sidebar-new-note" class="sidebar-inline-add" type="button" aria-label="新建便签" title="新建便签">＋</button></div>
         <div class="sidebar-nav-row"><button id="module-sessions" class="sidebar-nav-item" type="button" role="tab" aria-label="会话" aria-selected="false" aria-controls="task-list"><span class="module-icon session-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3z"/><path d="M8 9h8M8 12h5"/></svg></span><span>会话</span><b class="module-count" aria-hidden="true">0</b></button><button id="sidebar-new-session-task" class="sidebar-inline-add" type="button" aria-label="新建会话" title="新建会话">＋</button></div>
       </div>
@@ -38,6 +38,6 @@
     </div>
     <footer class="session-bottom-bar">
 <div id="session-note-buttons" class="session-note-buttons" aria-label="会话便签"></div><div id="topbar-note-buttons" class="session-note-buttons topbar-note-buttons" aria-label="提醒便签"></div><div id="toast-root" role="status" aria-live="polite" aria-atomic="true"><div id="note-marquee" class="note-marquee" aria-label="通知消息框" aria-hidden="true"></div></div></footer></div><div id="modal-root"></div>
-  <script type="module" src="app.js?v=session-note-tooltip-520"></script>
+  <script type="module" src="app.js?v=task-create-session-option-527"></script>
 </body>
 </html>
