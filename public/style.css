@@ -1948,7 +1948,11 @@ body.theme-classic.theme-dark {
 }
 body.theme-classic #workspace-main { background: var(--bg); background-image: linear-gradient(var(--surface-muted) 1px, transparent 1px), linear-gradient(90deg, var(--surface-muted) 1px, transparent 1px); background-size: 32px 32px; background-blend-mode: soft-light; }
 body.theme-classic .topbar { background: color-mix(in srgb, var(--surface-raised) 94%, transparent); border-bottom: 0; backdrop-filter: blur(14px); }
-body.theme-classic .brand-mark { width: 30px; height: 30px; border-radius: 7px; background: linear-gradient(145deg, #1765b5, #3b91e8); color: #fff; box-shadow: 0 4px 10px rgba(40,111,202,.24); }
+body.theme-classic .brand-mark { width: 30px; height: 30px; border-radius: 7px; background: transparent; color: var(--accent); box-shadow: none; }
+body.theme-classic.theme-dark .brand-mark { color: #fff; }
+@media (prefers-color-scheme: dark) {
+  body.theme-classic:not(.theme-light) .brand-mark { color: #fff; }
+}
 body.theme-classic #task-toolbar { background: color-mix(in srgb, var(--bg) 94%, transparent); border-bottom: 1px solid var(--line); }
 body.theme-classic .toolbar-controls, body.theme-classic .board-filter-tabs { border-radius: 8px; background: var(--surface-raised); box-shadow: var(--shadow); }
 body.theme-classic .sidebar-nav-item.active { border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
