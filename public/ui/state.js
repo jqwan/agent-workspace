@@ -143,7 +143,7 @@ export function loadLayoutState() {
   if (typeof saved.sessionSessionId === 'string' && saved.sessionSessionId) state.sessionSessionId = saved.sessionSessionId;
   if (Array.isArray(saved.collapsedSessionTasks)) state.collapsedSessionTasks = new Set(saved.collapsedSessionTasks.filter((id) => typeof id === 'string'));
   if (Array.isArray(saved.collapsedSessionPaths)) state.collapsedSessionPaths = new Set(saved.collapsedSessionPaths.filter((path) => typeof path === 'string'));
-  if (saved.sessionTreeGroupMode === 'path' || saved.sessionTreeGroupMode === 'task') state.sessionTreeGroupMode = saved.sessionTreeGroupMode;
+  if (saved.sessionTreeGroupMode === 'path' || saved.sessionTreeGroupMode === 'task' || saved.sessionTreeGroupMode === 'combined') state.sessionTreeGroupMode = saved.sessionTreeGroupMode;
   if (Array.isArray(saved.sessionTaskIds)) state.sessionTaskIds = new Set(saved.sessionTaskIds.filter((id) => typeof id === 'string'));
   if (Array.isArray(saved.hiddenCompletedSessionTasks)) state.hiddenCompletedSessionTasks = new Set(saved.hiddenCompletedSessionTasks.filter((id) => typeof id === 'string'));
 }

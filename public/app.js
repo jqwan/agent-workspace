@@ -80,7 +80,6 @@ let sessionTreeSort = SESSION_TREE_SORT_VALUES.has(localStorage.getItem('workben
   : 'updated';
 let sessionTreeSearchOpen = false;
 let sessionTreeSortOpen = false;
-let sessionTreeGroupOpen = false;
 let noteDragTimer = null;
 let noteDrag = null;
 let suppressNoteClickUntil = 0;
@@ -95,7 +94,8 @@ function recentWorkingDirs() {
   let saved = [];
   try { const parsed = JSON.parse(localStorage.getItem('workbench-working-dirs') || '[]'); if (Array.isArray(parsed)) saved = parsed; } catch { /* ignore malformed browser data */ }
   const hidden = new Set(hiddenWorkingDirs());
-  return [...new Set([...saved, ...state.tasks.map((task) => task.workingDir)].filter((item) => item && !hidden.has(item)))].slice(0, 12);
+  const taskDirs = state.tasks.flatMap((task) => Array.isArray(task.workingDirs) ? task.workingDirs : [task.workingDir]);
+  return [...new Set([...saved, ...taskDirs].filter((item) => item && !hidden.has(item)))].slice(0, 12);
 }
 function rememberWorkingDir(value) {
   const dir = String(value || '').trim();
@@ -448,9 +448,27 @@ function startMarqueeMotion(motion) {
     track.style.transform = `translate3d(${root.clientWidth - motion.travel}px, 0, 0)`;
     marqueeMotionFrame = requestAnimationFrame(tick);
   };
+  motion.tick = tick;
   track.style.transform = `translate3d(${root.clientWidth}px, 0, 0)`;
   motion.lastTime = performance.now();
   marqueeMotionFrame = requestAnimationFrame(tick);
+}
+function pauseMarqueeMotion() {
+  if (marqueeMotionFrame !== null) cancelAnimationFrame(marqueeMotionFrame);
+  marqueeMotionFrame = null;
+}
+function resumeMarqueeMotion() {
+  if (!marqueeMotion || marqueeMotionFrame !== null) return;
+  if (!marqueeMotion.tick) {
+    const motion = marqueeMotion;
+    marqueeMotionFrame = requestAnimationFrame(() => {
+      marqueeMotionFrame = null;
+      if (marqueeMotion === motion) startMarqueeMotion(motion);
+    });
+    return;
+  }
+  marqueeMotion.lastTime = performance.now();
+  marqueeMotionFrame = requestAnimationFrame(marqueeMotion.tick);
 }
 function renderMarquee() {
   stopMarqueeMotion();
@@ -469,6 +487,7 @@ function renderMarquee() {
   const initialItems = Array.from({ length: MARQUEE_INITIAL_ITEMS }, () => marqueeItemMarkup(nextMarqueeMessage(motion))).join('');
   root.innerHTML = `<span class="note-marquee-track">${initialItems}</span>`;
   motion.track = root.querySelector('.note-marquee-track');
+  marqueeMotion = motion;
   // 有界预填充：最多补到 24 个节点，不使用可能失控的 while。
   for (let index = MARQUEE_INITIAL_ITEMS; index < MARQUEE_MAX_ITEMS && motion.track.getBoundingClientRect().width < root.clientWidth * 2; index += 1) {
     appendMarqueeItem(motion);
@@ -587,6 +606,14 @@ function titleIsHovered(node) {
   const owner = node.closest('.session-task-heading, .session-child-session, .session-title-row');
   return Boolean(owner && (owner.matches(':hover') || owner.matches(':focus-within')));
 }
+function titleTransformX(node) {
+  const transform = getComputedStyle(node).transform;
+  if (!transform || transform === 'none') return 0;
+  const values = transform.match(/^matrix3d\(([^)]+)\)$/)?.[1] || transform.match(/^matrix\(([^)]+)\)$/)?.[1];
+  if (!values) return 0;
+  const parts = values.split(',').map(Number);
+  return transform.startsWith('matrix3d') ? (parts[12] || 0) : (parts[4] || 0);
+}
 function syncTitleMarquee(node, overflowing) {
   const current = titleAnimations.get(node);
   if (!overflowing || !titleIsHovered(node) || matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -596,12 +623,23 @@ function syncTitleMarquee(node, overflowing) {
   }
   const distance = Math.max(0, node.scrollWidth - node.clientWidth);
   if (current?.distance === distance) return;
+  // 操作按钮显隐会改变标题视口宽度；重测距离时保留当前动画位置，避免新动画从 0 开始造成“先后退再前进”。
+  const previousX = current ? titleTransformX(node) : 0;
+  const previousTiming = current?.animation.effect?.getComputedTiming();
   current?.animation.cancel();
-  // 从当前位置立即开始匀速滚动，避免悬浮时先向后“弹”一下。
+  const duration = (distance / TITLE_MARQUEE_SPEED) * 1000;
   const animation = node.animate([
     { transform: 'translateX(0)' },
     { transform: `translateX(${-distance}px)` },
-  ], { duration: (distance / TITLE_MARQUEE_SPEED) * 1000, iterations: Infinity, direction: 'alternate', easing: 'linear', fill: 'both' });
+  ], { duration, iterations: Infinity, direction: 'alternate', easing: 'linear', fill: 'both' });
+  if (current && previousTiming && distance > 0) {
+    const iteration = Math.max(0, Number(previousTiming.currentIteration) || 0);
+    const clampedX = Math.min(0, Math.max(-distance, previousX));
+    const progress = iteration % 2 === 0
+      ? -clampedX / distance
+      : 1 + clampedX / distance;
+    animation.currentTime = (iteration + Math.min(1, Math.max(0, progress))) * duration;
+  }
   titleAnimations.set(node, { animation, distance });
 }
 function syncOverflowTooltips(root = document) {
@@ -649,8 +687,17 @@ function renderStats() {
   state.tasks.forEach((task) => { if (counts[task.status] !== undefined) counts[task.status]++; if (task.overdue) overdue++; });
   $('#stats').innerHTML = ['unfinished', 'done'].map((key) => `<span class="chip ${STATUS[key].cls}">${STATUS[key].label} ${number(counts[key])}</span>`).join('') + (overdue ? `<span class="chip overdue">逾期 ${number(overdue)}</span>` : '');
 }
-const GROUP_ICONS = { '': '▦', unfinished: '○', done: '✓', archived: '✕' };
-const STATUS_ICONS = { unfinished: '○', done: '✓', archived: '✕' };
+const GROUP_ICONS = {
+  '': '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>',
+  unfinished: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>',
+  done: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
+  archived: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>',
+};
+const STATUS_ICONS = {
+  unfinished: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>',
+  done: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
+  archived: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>',
+};
 function syncArchiveButton() {
   const button = $('#archive-toggle');
   if (!button) return;
@@ -716,6 +763,8 @@ function visibleTasks() {
 }
 const ACTION_ICONS = {
   open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM7 9l2 2-2 2M12 13h4"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>',
+  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.75 6.75 10.5 10.5M17.25 6.75 6.75 17.25"/></svg>',
   complete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 10-10 4 4L8 20H4zM13 7l4 4"/></svg>',
   delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>',
@@ -730,6 +779,7 @@ const ACTION_ICONS = {
   topbar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16M8 7h.01M11 7h.01"/></svg>',
   session: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 3z"/><path d="M8 9h8M8 12h5"/></svg>',
   task: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
+  chevronDown: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
 };
 function actionButton(action, id, label, iconName, className = '', pressed = null) {
   const pressedAttribute = pressed === null ? '' : ` aria-pressed="${pressed}"`;
@@ -959,8 +1009,10 @@ function sessionCard(entry, compact = false) {
   const title = session.title || '新会话';
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
-  const running = Boolean(session.running);
-  const stateIcon = `<span class="session-card-state${running ? ' running' : ''}" title="${running ? '运行中' : '未运行'}" aria-label="${running ? '运行中' : '未运行'}">${running ? '●' : '○'}</span>`;
+  const current = state.module === 'session' && state.sessionTask === task.id && state.sessionSessionId === session.id;
+  const unread = current ? 0 : (Number(session.unreadCount) || 0);
+  const marker = sessionTreeMarker(session, unread);
+  const stateIcon = `<span class="session-card-marker${sessionMarkerClassSuffix(session, unread)}" role="img" aria-label="${marker.actionLabel}" title="${marker.actionLabel}">${marker.icon}</span>`;
   const stats = session.stats || {};
   const totalTokens = (Number(stats.input) || 0) + (Number(stats.output) || 0) + (Number(stats.cacheRead) || 0) + (Number(stats.cacheWrite) || 0);
   const summary = stats.messages || totalTokens
@@ -978,7 +1030,7 @@ function sessionCard(entry, compact = false) {
     const favoriteClass = session.favorite ? 'note-pin-active' : '';
     actionsHtml = `${sessionActionButton('open-session-card', task.id, session.id, '打开会话', 'open', 'primary')}${sessionActionButton('toggle-session-favorite', task.id, session.id, favoriteLabel, 'star', favoriteClass, session.favorite)}${sessionActionButton('rename-session', task.id, session.id, '重命名会话', 'edit')}${sessionActionButton('delete-session-card', task.id, session.id, '删除会话', 'delete', 'danger')}`;
   }
-  return `<article class="card session-card${isArchived ? ' archived' : ''} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row">${stateIcon}<h3 class="card-title" data-tooltip="${esc(title)}">${esc(title)}</h3>${session.favorite ? '<span class="session-card-favorite" title="已收藏">★</span>' : ''}</div><div class="session-card-task" data-tooltip="${esc(task.workingDir || '未设置工作路径')}">${ACTION_ICONS.folder} ${esc(task.workingDir || '未设置工作路径')}</div></div></div><p class="card-desc" data-tooltip="${esc(summary)}">${esc(summary)}</p><div class="session-card-meta"><span data-tooltip="${esc(task.title)}">${ACTION_ICONS.task} ${esc(task.title)}</span><span>${ACTION_ICONS.clock} 更新于 ${time(session.updatedAt)}</span></div>${isArchived ? `<div class="archive-info">废弃 · ${time(session.archivedAt)}</div>` : ''}<div class="card-actions">${actionsHtml}</div></article>`;
+  return `<article class="card session-card${isArchived ? ' archived' : ''} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row">${stateIcon}<h3 class="card-title" data-tooltip="${esc(title)}">${esc(title)}</h3></div><div class="session-card-task" data-tooltip="${esc(task.workingDir || '未设置工作路径')}">${ACTION_ICONS.folder} ${esc(task.workingDir || '未设置工作路径')}</div></div></div><p class="card-desc" data-tooltip="${esc(summary)}">${esc(summary)}</p><div class="session-card-meta"><span data-tooltip="${esc(task.title)}">${ACTION_ICONS.task} ${esc(task.title)}</span><span>${ACTION_ICONS.clock} 更新于 ${time(session.updatedAt)}</span></div>${isArchived ? `<div class="archive-info">废弃 · ${time(session.archivedAt)}</div>` : ''}<div class="card-actions">${actionsHtml}</div></article>`;
 }
 function visibleSessionEntries() {
   const query = state.search.toLowerCase();
@@ -1092,15 +1144,19 @@ function taskSwitchStatusIcon(status) {
   const label = STATUS[normalizedStatus].label;
   return `<span class="card-status-icon ${normalizedStatus}" role="img" aria-label="状态：${esc(label)}" title="${esc(label)}">${STATUS_ICONS[normalizedStatus]}</span>`;
 }
-function sessionSwitchStatusIcon(running) {
-  const label = running ? '运行中' : '关闭中';
-  return `<span class="session-card-state${running ? ' running' : ''}" role="img" aria-label="${label}" title="${label}">${running ? '●' : '○'}</span>`;
+function sessionSwitchSessionMarker(session, current = false) {
+  const unread = current ? 0 : (Number(session.unreadCount) || 0);
+  const marker = sessionTreeMarker(session, unread);
+  return `<span class="session-card-marker session-switch-marker${sessionMarkerClassSuffix(session, unread)}" role="img" aria-label="${marker.actionLabel}" title="${marker.actionLabel}">${marker.icon}</span>`;
 }
 function sessionSwitchOptionMarkup(label, attributes, active = false, metaHtml = '') {
   return `<button type="button" role="menuitem" class="session-switch-option${active ? ' active' : ''}" ${attributes}><span class="session-switch-option-label" data-tooltip="${esc(label)}">${esc(label)}</span>${metaHtml}</button>`;
 }
 function sessionTasksWithChildren() {
   return sessionTasks().filter((item) => availableSessions(item).length > 0);
+}
+function sessionTasksWithChildrenForPath(path = currentTask(state.sessionTask)?.workingDir || '') {
+  return sessionTasksWithChildren().filter((task) => (task.workingDir || '') === path);
 }
 function sessionPathSwitchOptions() {
   const groups = new Map();
@@ -1111,48 +1167,59 @@ function sessionPathSwitchOptions() {
   });
   return [...groups.entries()].map(([path, tasks]) => ({ path, tasks })).sort((a, b) => sessionTreeCompareText(a.path || '未设置工作路径', b.path || '未设置工作路径'));
 }
+function sessionSwitchEntries(task) {
+  if (!task) return [];
+  const visibleTasks = sessionTreeVisibleTasks();
+  if (state.sessionTreeGroupMode === 'path') {
+    const path = task.workingDir || '未设置工作路径';
+    return sessionTreePathGroups(visibleTasks).find((group) => group.path === path)?.entries || [];
+  }
+  const visibleTask = visibleTasks.find((entry) => entry.task.id === task.id);
+  return visibleTask ? visibleTask.sessions.map((session) => ({ task: visibleTask.task, session })) : [];
+}
 function lastOpenedSessionForPath(path) {
   const tasks = sessionPathSwitchOptions().find((item) => item.path === path)?.tasks || [];
   const entries = tasks.flatMap((task) => availableSessions(task).map((session) => ({ task, session })));
   return entries.sort(({ session: a }, { session: b }) => sessionTreeTime(b.updatedAt) - sessionTreeTime(a.updatedAt))[0] || null;
 }
 function renderSessionSwitchMenus(task, sessions) {
+  const pathMenu = $('#session-path-switch-menu');
   const taskMenu = $('#session-task-switch-menu');
   const sessionMenu = $('#session-session-switch-menu');
   const pathMode = state.sessionTreeGroupMode === 'path';
-  if (pathMode) {
-    const pathOptions = sessionPathSwitchOptions();
-    const currentPath = task?.workingDir || '';
-    taskMenu.setAttribute('aria-label', '切换工作路径');
-    taskMenu.innerHTML = pathOptions.length
-      ? pathOptions.map((item) => sessionSwitchOptionMarkup(
-        item.path || '未设置工作路径',
-        `data-session-switch-path="${esc(item.path)}"`,
-        item.path === currentPath,
-      )).join('')
-      : '<span class="session-switch-empty">暂无具有子会话的工作路径</span>';
-  } else {
-    const taskOptions = sessionTasksWithChildren();
-    taskMenu.setAttribute('aria-label', '切换任务');
-    taskMenu.innerHTML = taskOptions.length
-      ? taskOptions.map((item) => sessionSwitchOptionMarkup(
-        item.title || '未命名任务',
-        `data-session-switch-task="${esc(item.id)}"`,
-        item.id === state.sessionTask,
-        sessionSwitchMetaGroup(taskSwitchStatusIcon(item.status)),
-      )).join('')
-      : '<span class="session-switch-empty">暂无具有子会话的任务</span>';
-  }
+  const combinedMode = state.sessionTreeGroupMode === 'combined';
+  const pathOptions = sessionPathSwitchOptions();
+  const currentPath = task?.workingDir || '';
+  pathMenu.setAttribute('aria-label', '切换工作路径');
+  pathMenu.innerHTML = pathOptions.length
+    ? pathOptions.map((item) => sessionSwitchOptionMarkup(
+      item.path || '未设置工作路径',
+      `data-session-switch-path="${esc(item.path)}"`,
+      item.path === currentPath,
+    )).join('')
+    : '<span class="session-switch-empty">暂无具有子会话的工作路径</span>';
+  const taskOptions = combinedMode ? sessionTasksWithChildrenForPath(currentPath) : sessionTasksWithChildren();
+  taskMenu.setAttribute('aria-label', '切换任务');
+  taskMenu.innerHTML = taskOptions.length
+    ? taskOptions.map((item) => sessionSwitchOptionMarkup(
+      item.title || '未命名任务',
+      `data-session-switch-task="${esc(item.id)}"`,
+      item.id === state.sessionTask,
+      sessionSwitchMetaGroup(taskSwitchStatusIcon(item.status)),
+    )).join('')
+    : '<span class="session-switch-empty">暂无具有子会话的任务</span>';
   sessionMenu.innerHTML = sessions.length
-    ? sessions.map((item) => sessionSwitchOptionMarkup(
+    ? sessions.map(({ task: sessionTask, session: item }) => sessionSwitchOptionMarkup(
       item.title || '新会话',
-      `data-session-switch-session="${esc(item.id)}"`,
+      `data-session-switch-session="${esc(item.id)}" data-session-switch-task="${esc(sessionTask.id)}"`,
       item.id === state.sessionSessionId,
-      sessionSwitchMetaGroup(sessionSwitchStatusIcon(item.running)),
+      sessionSwitchMetaGroup(sessionSwitchSessionMarker(item, item.id === state.sessionSessionId)),
     )).join('')
     : '<span class="session-switch-empty">暂无可用子会话</span>';
-  taskMenu.classList.toggle('hidden', sessionSwitchMenuOpen !== 'task');
+  pathMenu.classList.toggle('hidden', !pathMode && !combinedMode || sessionSwitchMenuOpen !== 'path');
+  taskMenu.classList.toggle('hidden', pathMode || sessionSwitchMenuOpen !== 'task');
   sessionMenu.classList.toggle('hidden', sessionSwitchMenuOpen !== 'session');
+  $('#session-path-name').setAttribute('aria-expanded', String(sessionSwitchMenuOpen === 'path'));
   $('#session-task-name').setAttribute('aria-expanded', String(sessionSwitchMenuOpen === 'task'));
   $('#session-name').setAttribute('aria-expanded', String(sessionSwitchMenuOpen === 'session'));
 }
@@ -1160,34 +1227,47 @@ function renderSessionHeader() {
   const task = currentTask(state.sessionTask);
   renderSessionNoteButtons();
   $('#session-view').classList.toggle('no-session', !task);
-  const sessions = availableSessions(task);
-  const child = sessions.find((session) => session.id === state.sessionSessionId);
+  const sessionEntries = sessionSwitchEntries(task);
+  const child = availableSessions(task).find((session) => session.id === state.sessionSessionId);
   const sessionName = child ? (child.title || '新会话') : (task ? '新会话' : '选择一个子会话');
   const taskName = task?.title?.trim() || '';
   const pathMode = state.sessionTreeGroupMode === 'path';
-  const groupName = pathMode ? workingPathLabel(task?.workingDir) : taskName;
-  const groupTooltip = pathMode ? (task?.workingDir || '未设置工作路径') : groupName;
-  const groupKind = pathMode ? '工作路径' : '任务';
-  const displayName = task ? `${groupName} / ${sessionName}` : sessionName;
+  const combinedMode = state.sessionTreeGroupMode === 'combined';
+  const showPath = pathMode || combinedMode;
+  const showTask = !pathMode;
+  const pathName = task ? workingPathLabel(task.workingDir) : '';
+  const pathTooltip = task?.workingDir || '未设置工作路径';
+  const displayName = task
+    ? (combinedMode ? `${pathName} / ${taskName} / ${sessionName}` : `${showPath ? pathName : taskName} / ${sessionName}`)
+    : sessionName;
+  const pathNameNode = $('#session-path-name');
   const taskNameNode = $('#session-task-name');
-  const separatorNode = $('#session-title-separator');
-  taskNameNode.textContent = groupName || `选择${groupKind}`;
-  taskNameNode.classList.toggle('hidden', !groupName);
+  const pathTaskSeparatorNode = $('#session-path-task-separator');
+  const sessionSeparatorNode = $('#session-title-separator');
+  pathNameNode.textContent = pathName || '选择工作路径';
+  pathNameNode.classList.toggle('hidden', !showPath || !pathName);
+  pathNameNode.disabled = !task;
+  pathNameNode.title = task ? '切换工作路径' : '暂无可用工作路径';
+  pathNameNode.setAttribute('aria-label', task ? '切换工作路径' : '暂无可用工作路径');
+  pathNameNode.dataset.tooltip = pathTooltip;
+  taskNameNode.textContent = taskName || '选择任务';
+  taskNameNode.classList.toggle('hidden', !showTask || !taskName);
   taskNameNode.disabled = !task;
-  taskNameNode.title = task ? `切换${groupKind}` : `暂无可用${groupKind}`;
-  taskNameNode.setAttribute('aria-label', task ? `切换${groupKind}` : `暂无可用${groupKind}`);
-  taskNameNode.dataset.tooltip = groupTooltip || `选择${groupKind}`;
-  separatorNode.classList.toggle('hidden', !groupName);
+  taskNameNode.title = task ? '切换任务' : '暂无可用任务';
+  taskNameNode.setAttribute('aria-label', task ? '切换任务' : '暂无可用任务');
+  taskNameNode.dataset.tooltip = taskName || '选择任务';
+  pathTaskSeparatorNode.classList.toggle('hidden', !showPath || !pathName || !showTask || !taskName);
+  sessionSeparatorNode.classList.toggle('hidden', !(showTask ? taskName : pathName));
   $('#session-name').textContent = sessionName;
-  $('#session-name').disabled = !task || !sessions.length;
-  $('#session-name').title = task && sessions.length ? '切换子会话' : '暂无可用子会话';
+  $('#session-name').disabled = !task || !sessionEntries.length;
+  $('#session-name').title = task && sessionEntries.length ? '切换子会话' : '暂无可用子会话';
   $('#session-name').dataset.tooltip = displayName;
   if (!task) {
     sessionTaskDetailsOpen = false;
     sessionActionMenuOpen = false;
     sessionSwitchMenuOpen = null;
   }
-  renderSessionSwitchMenus(task, sessions);
+  renderSessionSwitchMenus(task, sessionEntries);
   const titleRow = $('#session-name').closest('.session-title-row');
   syncOverflowTooltips(titleRow);
   requestAnimationFrame(() => syncOverflowTooltips(titleRow));
@@ -1228,10 +1308,37 @@ function closeSessionSwitchMenu() {
   if (!sessionSwitchMenuOpen) return;
   sessionSwitchMenuOpen = null;
   const task = currentTask(state.sessionTask);
-  renderSessionSwitchMenus(task, availableSessions(task));
+  renderSessionSwitchMenus(task, sessionSwitchEntries(task));
+}
+function sessionTaskHasRunningSessions(task) {
+  return Boolean(task?.piRunning || availableSessions(task).some((session) => session.running));
+}
+function syncSessionTreeActions(tasks) {
+  const root = $('#session-tree');
+  for (const button of root.querySelectorAll('[data-remove-completed-task]')) {
+    const task = tasks.find((item) => item.id === button.dataset.removeCompletedTask);
+    if (!task) continue;
+    const running = sessionTaskHasRunningSessions(task);
+    const label = running ? `关闭任务「${task.title}」下的全部子会话` : '从会话栏移除任务及其子会话';
+    button.innerHTML = running ? ACTION_ICONS.stop : ACTION_ICONS.close;
+    button.classList.toggle('running', running);
+    button.title = label;
+    button.setAttribute('aria-label', label);
+  }
+  for (const button of root.querySelectorAll('[data-remove-session-path]')) {
+    const path = button.dataset.removeSessionPath;
+    const pathTasks = tasks.filter((task) => (task.workingDir || '未设置工作路径') === path);
+    const running = pathTasks.some(sessionTaskHasRunningSessions);
+    const label = running ? `关闭工作路径「${workingPathLabel(path === '未设置工作路径' ? '' : path)}」下的全部子会话` : '从会话栏移除工作路径及其子会话';
+    button.innerHTML = running ? ACTION_ICONS.stop : ACTION_ICONS.close;
+    button.classList.toggle('running', running);
+    button.title = label;
+    button.setAttribute('aria-label', label);
+  }
 }
 function syncSessionTreeUnread(tasks) {
   const root = $('#session-tree');
+  syncSessionTreeActions(tasks);
   for (const task of tasks) {
     for (const session of availableSessions(task)) {
       const row = [...root.querySelectorAll('.session-child-session')].find((item) => item.dataset.sessionTask === task.id && item.dataset.sessionId === session.id);
@@ -1246,23 +1353,36 @@ function syncSessionTreeUnread(tasks) {
         favoriteButton.innerHTML = marker.icon;
         favoriteButton.classList.toggle('favorite', Boolean(session.favorite));
         favoriteButton.classList.toggle('unread', unread > 0);
+        favoriteButton.classList.toggle('running', Boolean(session.running));
+        favoriteButton.classList.toggle('stopped', !session.running);
         favoriteButton.title = marker.actionLabel;
         favoriteButton.setAttribute('aria-label', marker.actionLabel);
         favoriteButton.setAttribute('aria-pressed', String(Boolean(session.favorite)));
       }
       row.querySelector('.session-child-open')?.setAttribute('aria-label', `${title}${unread ? `，${unreadLabel}条未读消息` : ''}`);
+      const deleteButton = row.querySelector('.session-child-delete');
+      if (deleteButton) {
+        const sessionActionLabel = session.running ? '关闭会话' : '删除会话';
+        deleteButton.innerHTML = session.running ? ACTION_ICONS.stop : ACTION_ICONS.delete;
+        deleteButton.title = sessionActionLabel;
+        deleteButton.setAttribute('aria-label', sessionActionLabel);
+      }
     }
   }
+}
+function sessionMarkerClassSuffix(session, unread) {
+  return `${session.favorite ? ' favorite' : ''}${unread > 0 ? ' unread' : ''}${session.running ? ' running' : ' stopped'}`;
 }
 function sessionTreeMarker(session, unread) {
   const hasUnread = unread > 0;
   const favorite = Boolean(session.favorite);
+  const running = Boolean(session.running);
   const icon = favorite
     ? `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="session-marker-${hasUnread ? 'filled' : 'outline'}" d="M12 3.5 14.63 8.83l5.88.85-4.25 4.14 1 5.85L12 16.91l-5.26 2.76 1-5.85-4.25-4.14 5.88-.85L12 3.5Z"/></svg>`
     : `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="session-marker-${hasUnread ? 'filled' : 'outline'}" cx="12" cy="12" r="6.5"/></svg>`;
   const action = favorite ? '取消收藏会话' : '收藏会话';
   const unreadText = hasUnread ? `${unread > 99 ? '99+' : unread}条未读消息` : '无未读消息';
-  return { icon, actionLabel: `${action}，${unreadText}` };
+  return { icon, actionLabel: `${running ? '运行中' : '关闭中'}，${action}，${unreadText}` };
 }
 function sessionItemMarkup(task, session, index) {
   const title = session.title || `子会话 ${index + 1}`;
@@ -1270,35 +1390,58 @@ function sessionItemMarkup(task, session, index) {
   const unread = current ? 0 : (Number(session.unreadCount) || 0);
   const unreadLabel = unread > 99 ? '99+' : String(unread);
   const marker = sessionTreeMarker(session, unread);
-  return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="child-favorite${session.favorite ? ' favorite' : ''}${unread ? ' unread' : ''}" data-favorite-session-task="${esc(task.id)}" data-favorite-session-id="${esc(session.id)}" title="${marker.actionLabel}" aria-label="${marker.actionLabel}" aria-pressed="${Boolean(session.favorite)}">${marker.icon}</button><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="session-title-text-viewport"><span class="session-child-name session-title-text" data-tooltip="${esc(title)}">${esc(title)}</span></span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="删除子会话" aria-label="删除子会话">×</button></div>`;
+  const sessionActionLabel = session.running ? '关闭会话' : '删除会话';
+  const sessionActionIcon = session.running ? ACTION_ICONS.stop : ACTION_ICONS.delete;
+  return `<div class="session-child-session${current ? ' active' : ''}" data-session-task="${esc(task.id)}" data-session-id="${esc(session.id)}"><button type="button" class="child-favorite${sessionMarkerClassSuffix(session, unread)}" data-favorite-session-task="${esc(task.id)}" data-favorite-session-id="${esc(session.id)}" title="${marker.actionLabel}" aria-label="${marker.actionLabel}" aria-pressed="${Boolean(session.favorite)}">${marker.icon}</button><button type="button" class="session-child-open" aria-label="${esc(title)}${unread ? `，${unreadLabel}条未读消息` : ''}"><span class="session-title-text-viewport"><span class="session-child-name session-title-text" data-tooltip="${esc(title)}">${esc(title)}</span></span></button><button type="button" class="session-child-delete" data-delete-session="${esc(task.id)}" data-session-id="${esc(session.id)}" title="${sessionActionLabel}" aria-label="${sessionActionLabel}">${sessionActionIcon}</button></div>`;
 }
-function sessionGroupMarkup(task, visibleSessions = availableSessions(task)) {
+function sessionGroupMarkup(task, visibleSessions = availableSessions(task), className = '') {
   const collapsed = state.collapsedSessionTasks.has(task.id);
   const colorKey = taskColor(task);
   const customClass = customColors[colorKey] ? ' custom-color' : '';
-  const taskActions = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task" data-remove-completed-task="${esc(task.id)}" title="从会话管理移除" aria-label="从会话管理移除${esc(task.title)}">×</button>`;
+  const running = sessionTaskHasRunningSessions(task);
+  const removeLabel = running ? `关闭任务「${task.title}」下的全部子会话` : '从会话栏移除任务及其子会话';
+  const taskStatus = STATUS[task.status] ? task.status : 'unfinished';
+  const taskStatusLabel = STATUS[taskStatus].label;
+  const taskStatusIcon = `<span class="card-status-icon session-task-status-icon ${taskStatus}" role="img" aria-label="状态：${esc(taskStatusLabel)}" title="${esc(taskStatusLabel)}">${STATUS_ICONS[taskStatus]}</span>`;
+  const taskActions = `<button type="button" class="session-new-child" data-new-session-task="${esc(task.id)}" title="新建子会话" aria-label="为${esc(task.title)}新建子会话">＋</button><button type="button" class="session-remove-task${running ? ' running' : ''}" data-remove-completed-task="${esc(task.id)}" title="${esc(removeLabel)}" aria-label="${esc(removeLabel)}">${running ? ACTION_ICONS.stop : ACTION_ICONS.close}</button>`;
   const sessions = visibleSessions.map((session, index) => sessionItemMarkup(task, session, index)).join('');
   const items = collapsed ? '' : sessions;
-  return `<div class="session-task-group"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text task-status-${esc(task.status)}" data-tooltip="${esc(task.title)}">${esc(task.title)}</span></span></button>${taskActions}</div>${items}</div>`;
+  return `<div class="session-task-group${className ? ` ${className}` : ''}"><div class="session-task-heading"><button type="button" class="session-task-title color-${colorKey}${customClass}"${customColorStyle(colorKey)} data-session-group="${esc(task.id)}" aria-label="${esc(task.title)}" aria-expanded="${!collapsed}">${taskStatusIcon}<span class="session-title-text-viewport"><span class="session-title-text" data-tooltip="${esc(task.title)}">${esc(task.title)}</span></span></button>${taskActions}</div>${items}</div>`;
 }
 function sessionTreePathGroups(visibleTasks) {
   const groups = new Map();
   visibleTasks.forEach(({ task, sessions }) => {
     const path = task.workingDir || '未设置工作路径';
     if (!groups.has(path)) groups.set(path, []);
-    sessions.forEach((session) => groups.get(path).push({ task, session }));
+    const group = groups.get(path);
+    group.push({ task, sessions, entries: sessions.map((session) => ({ task, session })) });
   });
-  return [...groups.entries()].map(([path, entries]) => ({
+  return [...groups.entries()].map(([path, tasks]) => ({
     path,
-    entries: entries.sort(({ session: a }, { session: b }) => sessionTreeCompareSessions(a, b)),
+    tasks: tasks.sort(({ task: a }, { task: b }) => sessionTreeCompareTasks(a, b)),
+    entries: tasks.flatMap(({ entries }) => entries).sort(({ session: a }, { session: b }) => sessionTreeCompareSessions(a, b)),
   })).sort((a, b) => sessionTreeCompareText(a.path, b.path));
+}
+function sessionPathActionsMarkup(path, tasks) {
+  const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
+  const running = tasks.some(({ task }) => sessionTaskHasRunningSessions(task));
+  const removeLabel = running ? `关闭工作路径「${label}」下的全部子会话` : '从会话栏移除工作路径及其子会话';
+  return `<button type="button" class="session-new-child" data-new-session-path="${esc(path)}" title="新建会话" aria-label="在工作路径${esc(path)}下新建会话">＋</button><button type="button" class="session-remove-task${running ? ' running' : ''}" data-remove-session-path="${esc(path)}" title="${esc(removeLabel)}" aria-label="${esc(removeLabel)}">${running ? ACTION_ICONS.stop : ACTION_ICONS.close}</button>`;
 }
 function sessionPathGroupMarkup(path, entries) {
   const collapsed = state.collapsedSessionPaths.has(path);
   const sessions = collapsed ? '' : entries.map(({ task, session }, index) => sessionItemMarkup(task, session, index)).join('');
   const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
-  const actions = `<button type="button" class="session-new-child" data-new-session-path="${esc(path)}" title="新建会话" aria-label="在工作路径${esc(path)}下新建会话">＋</button><button type="button" class="session-remove-task" data-remove-session-path="${esc(path)}" title="从会话管理移除" aria-label="从会话管理移除工作路径${esc(path)}">×</button>`;
+  const pathTasks = [...new Map(entries.map(({ task }) => [task.id, task])).values()];
+  const actions = sessionPathActionsMarkup(path, pathTasks.map((task) => ({ task })));
   return `<div class="session-task-group session-path-group"><div class="session-task-heading session-path-heading"><button type="button" class="session-task-title color-gray" data-session-path-group="${esc(path)}" aria-label="${esc(path)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text" data-tooltip="${esc(path)}">${esc(label)}</span></span></button>${actions}</div>${sessions}</div>`;
+}
+function sessionCombinedPathGroupMarkup(path, tasks) {
+  const collapsed = state.collapsedSessionPaths.has(path);
+  const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
+  const actions = sessionPathActionsMarkup(path, tasks);
+  const items = collapsed ? '' : tasks.map(({ task, sessions }) => sessionGroupMarkup(task, sessions, 'session-combined-task-group')).join('');
+  return `<div class="session-task-group session-path-group session-combined-path-group"><div class="session-task-heading session-path-heading"><button type="button" class="session-task-title color-gray" data-session-path-group="${esc(path)}" aria-label="${esc(path)}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span><span class="session-title-text-viewport"><span class="session-title-text" data-tooltip="${esc(path)}">${esc(label)}</span></span></button>${actions}</div>${items}</div>`;
 }
 function renderSessionTree() {
   renderSessionHeader();
@@ -1326,7 +1469,9 @@ function renderSessionTree() {
   $('#session-tree').innerHTML = visibleTasks.length
     ? state.sessionTreeGroupMode === 'path'
       ? pathGroups.map(({ path, entries }) => sessionPathGroupMarkup(path, entries)).join('')
-      : visibleTasks.map(({ task, sessions }) => sessionGroupMarkup(task, sessions)).join('')
+      : state.sessionTreeGroupMode === 'combined'
+        ? pathGroups.map(({ path, tasks }) => sessionCombinedPathGroupMarkup(path, tasks)).join('')
+        : visibleTasks.map(({ task, sessions }) => sessionGroupMarkup(task, sessions)).join('')
     : `<div class="empty sidebar-empty">${emptyText}</div>`;
   syncOverflowTooltips($('#session-tree'));
   syncSessionTreeUnread(tasks);
@@ -1334,7 +1479,7 @@ function renderSessionTree() {
 async function refresh() {
   try {
     const [data, noteData] = await Promise.all([api('/tasks'), api('/notes')]);
-    const signature = JSON.stringify({ tasks: data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.sessions?.length]), notes: noteData.notes.map((note) => [note.id, note.updatedAt, note.pinnedToTopBar, note.pinnedToSessionBar]) });
+    const signature = JSON.stringify({ tasks: data.tasks.map((task) => [task.id, task.status, task.updatedAt, task.activeSessionId, task.sessions?.map((session) => [session.id, session.status, session.running, session.favorite, session.unreadCount, session.updatedAt])]), notes: noteData.notes.map((note) => [note.id, note.updatedAt, note.pinnedToTopBar, note.pinnedToSessionBar]) });
     state.tasks = data.tasks;
     state.notes = noteData.notes;
     renderPinnedNotes();
@@ -1815,9 +1960,9 @@ function openTaskForm(task = null, options = {}) {
   const saveLabel = task ? '保存' : '确认';
   const openSessionOption = task ? '' : `<label class="note-switch"><input id="task-open-session" type="checkbox"${openSessionAfterCreate ? ' checked' : ''}> 创建后打开新会话</label>`;
   const workingDirEditable = true;
-  const workingDirHint = task ? '（仅新会话使用此路径）' : '';
+  const workingDirHint = task ? '（仅新会话使用这些路径）' : '';
   const workingDirReadonly = workingDirEditable ? '' : ' disabled';
-  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label for="task-working-dir">工作目录${workingDirHint}<div class="path-picker-row"><div class="working-dir-field"><input id="task-working-dir" name="workingDir" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list" value="${esc(task?.workingDir || '')}"${workingDirReadonly}><div id="recent-task-dir-list" class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" id="choose-task-dir" class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button></div><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div>${openSessionOption}<div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label>工作目录${workingDirHint}<div id="task-working-dirs" class="task-working-dirs"></div><button type="button" id="add-task-working-dir" class="add-working-dir hidden">＋ 添加子路径</button><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div>${openSessionOption}<div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   const colorPicker = $('#color-picker', form);
   const colorTrigger = $('#color-trigger', form);
@@ -1887,48 +2032,79 @@ function openTaskForm(task = null, options = {}) {
     renderColorPicker();
   });
   renderColorPicker();
-  const workingDirInput = $('#task-working-dir', form);
-  const recentList = $('#recent-task-dir-list', form);
-  const hideRecentOptions = () => { recentList.classList.add('hidden'); workingDirInput.setAttribute('aria-expanded', 'false'); };
-  const renderRecentOptions = () => {
-    const query = workingDirInput.value.trim().toLowerCase();
-    const dirs = recentWorkingDirs().filter((dir) => !query || dir.toLowerCase().includes(query));
-    recentList.innerHTML = dirs.length ? dirs.map((dir) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" data-recent-dir="${esc(dir)}">${esc(dir)}</button><button type="button" class="recent-dir-delete" data-remove-recent-dir="${esc(dir)}" aria-label="删除路径" title="删除路径">×</button></div>`).join('') : '';
-    recentList.classList.toggle('hidden', !dirs.length);
-    workingDirInput.setAttribute('aria-expanded', String(Boolean(dirs.length)));
+  const workingDirsRoot = $('#task-working-dirs', form);
+  const addWorkingDirButton = $('#add-task-working-dir', form);
+  const initialWorkingDirs = Array.isArray(task?.workingDirs) && task.workingDirs.length
+    ? task.workingDirs
+    : [task?.workingDir || ''];
+  const currentWorkingDirs = () => [...workingDirsRoot.querySelectorAll('[data-working-dir-input]')].map((input) => input.value.trim());
+  const updateAddWorkingDirButton = () => {
+    const inputs = [...workingDirsRoot.querySelectorAll('[data-working-dir-input]')];
+    addWorkingDirButton.classList.toggle('hidden', !inputs.length || !inputs.at(-1).value.trim());
+    workingDirsRoot.querySelectorAll('[data-remove-working-dir]').forEach((button) => {
+      button.classList.toggle('hidden', inputs.length <= 1);
+    });
   };
-  if (workingDirEditable) {
-    workingDirInput.addEventListener('focus', renderRecentOptions);
-    workingDirInput.addEventListener('input', renderRecentOptions);
-    workingDirInput.addEventListener('blur', () => setTimeout(hideRecentOptions, 150));
+  const bindWorkingDirRow = (row) => {
+    const input = $('[data-working-dir-input]', row);
+    const recentList = $('[data-working-dir-recent]', row);
+    const hideRecentOptions = () => { recentList.classList.add('hidden'); input.setAttribute('aria-expanded', 'false'); };
+    const renderRecentOptions = () => {
+      const query = input.value.trim().toLowerCase();
+      const dirs = recentWorkingDirs().filter((dir) => !query || dir.toLowerCase().includes(query));
+      recentList.innerHTML = dirs.length ? dirs.map((dir) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" data-recent-dir="${esc(dir)}">${esc(dir)}</button><button type="button" class="recent-dir-delete" data-remove-recent-dir="${esc(dir)}" aria-label="删除路径" title="删除路径">×</button></div>`).join('') : '';
+      recentList.classList.toggle('hidden', !dirs.length);
+      input.setAttribute('aria-expanded', String(Boolean(dirs.length)));
+    };
+    input.addEventListener('focus', renderRecentOptions);
+    input.addEventListener('input', () => { renderRecentOptions(); updateAddWorkingDirButton(); });
+    input.addEventListener('blur', () => setTimeout(hideRecentOptions, 150));
+    recentList.onclick = (event) => {
+      const remove = event.target.closest('[data-remove-recent-dir]');
+      if (remove) {
+        forgetWorkingDir(remove.dataset.removeRecentDir);
+        renderRecentOptions();
+        return;
+      }
+      const option = event.target.closest('[data-recent-dir]');
+      if (!option) return;
+      input.value = option.dataset.recentDir;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      hideRecentOptions();
+    };
+    $('[data-choose-working-dir]', row).onclick = async () => {
+      try {
+        const result = await api('/select-directory', { method: 'POST' });
+        if (result.path) { rememberWorkingDir(result.path); input.value = result.path; input.dispatchEvent(new Event('input', { bubbles: true })); }
+      } catch (error) { toast(error.message, 'error'); }
+    };
+    $('[data-remove-working-dir]', row).onclick = () => {
+      const values = currentWorkingDirs();
+      values.splice(Number(row.dataset.workingDirIndex), 1);
+      renderWorkingDirs(values);
+    };
+  };
+  function renderWorkingDirs(values) {
+    const rows = values.length ? values : [''];
+    workingDirsRoot.innerHTML = rows.map((value, index) => `<div class="task-working-dir-row path-picker-row" data-working-dir-index="${index}"><div class="working-dir-field"><input id="task-working-dir-${index}" data-working-dir-input name="workingDirs" autocomplete="off" placeholder="${index ? '输入子工作路径' : '输入默认工作路径'}" aria-autocomplete="list" aria-expanded="false" aria-controls="recent-task-dir-list-${index}" aria-label="${index ? `子工作目录 ${index}` : '默认工作目录'}" value="${esc(value)}"${workingDirReadonly}><div id="recent-task-dir-list-${index}" data-working-dir-recent class="recent-dir-list hidden" role="group" aria-label="最近工作路径"></div></div><button type="button" data-choose-working-dir class="icon-button" title="选择文件夹" aria-label="选择文件夹"${workingDirReadonly}>${ACTION_ICONS.folder}</button><button type="button" data-remove-working-dir class="icon-button working-dir-remove" title="移除路径" aria-label="移除路径">×</button></div>`).join('');
+    workingDirsRoot.querySelectorAll('.task-working-dir-row').forEach(bindWorkingDirRow);
+    updateAddWorkingDirButton();
   }
-  recentList.onclick = (event) => {
-    const remove = event.target.closest('[data-remove-recent-dir]');
-    if (remove) {
-      forgetWorkingDir(remove.dataset.removeRecentDir);
-      renderRecentOptions();
-      return;
-    }
-    const option = event.target.closest('[data-recent-dir]');
-    if (!option) return;
-    workingDirInput.value = option.dataset.recentDir;
-    workingDirInput.dispatchEvent(new Event('input', { bubbles: true }));
-    hideRecentOptions();
-  };
-  $('#choose-task-dir', form).onclick = async () => { try { const result = await api('/select-directory', { method: 'POST' }); if (result.path) { rememberWorkingDir(result.path); workingDirInput.value = result.path; renderRecentOptions(); } } catch (error) { toast(error.message, 'error'); } };
+  addWorkingDirButton.onclick = () => { renderWorkingDirs([...currentWorkingDirs(), '']); [...workingDirsRoot.querySelectorAll('[data-working-dir-input]')].at(-1)?.focus(); };
+  renderWorkingDirs(initialWorkingDirs.map((value) => String(value || '')));
   $('#save-task', form).onclick = async () => {
     const button = $('#save-task', form);
     try {
       const title = $('#task-title', form).value.trim();
-      const workingDir = $('#task-working-dir', form).value.trim();
+      const workingDirs = currentWorkingDirs().filter(Boolean);
       setFieldError(form, 'task-title');
       setFieldError(form, 'task-working-dir');
       if (!title) { setFieldError(form, 'task-title', '请输入任务标题。'); $('#task-title', form).focus(); return; }
-      if (workingDirEditable && !workingDir) { setFieldError(form, 'task-working-dir', '请选择或输入工作目录。'); $('#task-working-dir', form).focus(); return; }
+      if (workingDirEditable && !workingDirs.length) { setFieldError(form, 'task-working-dir', '请选择或输入工作目录。'); $('[data-working-dir-input]', form)?.focus(); return; }
       button.disabled = true;
       button.textContent = task ? '保存中…' : '确认中…';
-      if (workingDirEditable) rememberWorkingDir(workingDir);
-      const body = { title, description: $('#task-desc', form).value, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null, workingDir };
+      if (workingDirEditable) workingDirs.forEach(rememberWorkingDir);
+      const body = { title, description: $('#task-desc', form).value, color: $('#task-color', form).value, deadline: $('#task-deadline', form).value || null, workingDir: workingDirs[0], workingDirs };
       const result = await api(task ? `/tasks/${task.id}` : '/tasks', { method: task ? 'PUT' : 'POST', body });
       markCustomColorUsed(body.color);
       closeModal();
@@ -2033,9 +2209,11 @@ function openPurgeTaskModal(task) {
   $('#confirm-purge-task', form).onclick = async () => { try { await api(`/tasks/${task.id}/permanent`, { method: 'DELETE' }); closeModal(); toast('任务已永久删除'); refresh(); } catch (error) { toast(error.message, 'error'); } };
 }
 function openClearArchivedModal() {
-  const categoryLabel = { all: '卡片', tasks: '任务', notes: '便签' }[state.archiveType] || '卡片';
-  const fileSuffix = state.archiveType === 'notes' ? '' : '及其会话文件';
-  const form = modal(`<h2>清空${categoryLabel}</h2><p>确定永久删除当前类别下的全部废弃${categoryLabel}${fileSuffix}吗？此操作不可恢复。</p><div class="modal-actions"><button class="danger" id="confirm-purge-archived">全部清空</button><button data-close>取消</button></div>`);
+  const categoryLabel = { all: '卡片', tasks: '任务', notes: '便签', sessions: '会话' }[state.archiveType] || '卡片';
+  const description = state.archiveType === 'sessions'
+    ? '确定永久删除全部废弃会话吗？此操作不可恢复。'
+    : `确定永久删除全部废弃${categoryLabel}${state.archiveType === 'notes' ? '' : '及其会话文件'}吗？此操作不可恢复。`;
+  const form = modal(`<h2>清空${categoryLabel}</h2><p>${description}</p><div class="modal-actions"><button class="danger" id="confirm-purge-archived">全部清空</button><button data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
   $('#confirm-purge-archived', form).onclick = async () => {
     const button = $('#confirm-purge-archived', form);
@@ -2062,13 +2240,14 @@ async function createChildSession(task) {
     toast(error.message, 'error');
   }
 }
-function openNewSessionModal() {
-  const tasks = state.tasks.filter((task) => task.status !== 'archived');
+function openNewSessionModal(workingDir = null) {
+  const tasks = state.tasks.filter((task) => task.status !== 'archived'
+    && (workingDir === null || (task.workingDir || '未设置工作路径') === workingDir));
   if (!tasks.length) {
-    toast('请先新建一个任务', 'error');
+    toast(workingDir === null ? '请先新建一个任务' : '此工作路径下没有可用任务', 'error');
     return;
   }
-  const form = modal(`<h2>新建会话</h2><label for="new-session-task-input">所属任务<div class="working-dir-field new-session-task-field"><input id="new-session-task-input" name="taskId" autocomplete="off" readonly aria-autocomplete="list" aria-expanded="false" aria-controls="new-session-task-list" value="${esc(tasks[0].title)}"><div id="new-session-task-list" class="recent-dir-list hidden" role="listbox" aria-label="现有任务">${tasks.map((task) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" role="option" data-new-session-task-id="${esc(task.id)}" aria-selected="${task.id === tasks[0].id}">${esc(task.title)}</button></div>`).join('')}</div></div><span class="field-error hidden" data-error-for="new-session-task-input" role="alert"></span></label><label for="new-session-title-input">会话名称<input id="new-session-title-input" name="sessionTitle" autocomplete="off" value="新会话" placeholder="例如：检查登录模块…"><span class="field-error hidden" data-error-for="new-session-title-input" role="alert"></span></label><div class="modal-actions"><button type="button" class="primary" id="create-new-session">创建并进入终端</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>新建会话</h2><label for="new-session-task-input">所属任务<div class="working-dir-field new-session-task-field"><input id="new-session-task-input" name="taskId" autocomplete="off" readonly aria-autocomplete="list" aria-expanded="false" aria-controls="new-session-task-list" title="点击选择任务" value="${esc(tasks[0].title)}"><span class="new-session-task-dropdown-icon" aria-hidden="true">${ACTION_ICONS.chevronDown}</span><div id="new-session-task-list" class="recent-dir-list hidden" role="listbox" aria-label="现有任务">${tasks.map((task) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" role="option" data-new-session-task-id="${esc(task.id)}" aria-selected="${task.id === tasks[0].id}">${esc(task.title)}</button></div>`).join('')}</div></div><span class="field-error hidden" data-error-for="new-session-task-input" role="alert"></span></label><label for="new-session-title-input">会话名称<input id="new-session-title-input" name="sessionTitle" autocomplete="off" value="新会话" placeholder="例如：检查登录模块…"><span class="field-error hidden" data-error-for="new-session-title-input" role="alert"></span></label><div class="modal-actions"><button type="button" class="primary" id="create-new-session">创建并进入终端</button><button type="button" data-close>取消</button></div>`);
   form.classList.add('new-session-modal');
   $('[data-close]', form).onclick = closeModal;
   const taskInput = $('#new-session-task-input', form);
@@ -2076,8 +2255,10 @@ function openNewSessionModal() {
   let taskId = tasks[0].id;
   const closeTaskList = () => { taskList.classList.add('hidden'); taskInput.setAttribute('aria-expanded', 'false'); };
   const openTaskList = () => { taskList.classList.remove('hidden'); taskInput.setAttribute('aria-expanded', 'true'); };
-  taskInput.onclick = openTaskList;
-  taskInput.onfocus = openTaskList;
+  taskInput.onclick = () => {
+    if (taskList.classList.contains('hidden')) openTaskList();
+    else closeTaskList();
+  };
   taskInput.onblur = () => setTimeout(closeTaskList, 150);
   taskList.onclick = (event) => {
     const option = event.target.closest('[data-new-session-task-id]');
@@ -2166,74 +2347,77 @@ function leaveCurrentSession() {
   if (!state.sessionTask || !state.sessionSessionId) return;
   markSessionRead(state.sessionTask, state.sessionSessionId);
 }
+function clearCurrentSessionSelection(taskId = null, sessionId = null) {
+  if (!state.sessionTask || (taskId && state.sessionTask !== taskId) || (sessionId && state.sessionSessionId !== sessionId)) return false;
+  leaveCurrentSession();
+  detachTui();
+  state.sessionTask = null;
+  state.sessionSessionId = null;
+  saveLayoutState();
+  return true;
+}
 function hideSessionTask(task) {
-  const runningSessions = availableSessions(task).filter((session) => session.running);
-  if (!task.piRunning && !runningSessions.length) return applyHide();
-  const count = runningSessions.length || 1;
-  const form = modal(`<h2>终止运行中的会话？</h2><p>任务「${esc(task.title)}」有 ${count} 个子会话正在运行。隐藏任务会终止这些会话，是否继续？</p><div class="modal-actions"><button type="button" class="danger" id="confirm-hide-session-task">终止并隐藏</button><button type="button" data-close>取消</button></div>`);
-  $('[data-close]', form).onclick = closeModal;
-  $('#confirm-hide-session-task', form).onclick = async () => {
-    const button = $('#confirm-hide-session-task', form);
-    button.disabled = true;
-    try {
-      await api(`/tasks/${task.id}/terminate`, { method: 'POST' });
-      closeModal();
-      applyHide();
-    } catch (error) {
-      button.disabled = false;
-      toast(error.message, 'error');
-    }
-  };
-  function applyHide() {
-    state.sessionTaskIds.delete(task.id);
-    state.hiddenCompletedSessionTasks.add(task.id);
-    if (state.sessionTask === task.id) {
-      leaveCurrentSession();
-      detachTui();
-      state.sessionTask = null;
-      state.sessionSessionId = null;
-    }
-    renderSessionTree();
-    saveLayoutState();
+  state.sessionTaskIds.delete(task.id);
+  state.hiddenCompletedSessionTasks.add(task.id);
+  if (state.sessionTask === task.id) {
+    leaveCurrentSession();
+    detachTui();
+    state.sessionTask = null;
+    state.sessionSessionId = null;
   }
+  renderSessionTree();
+  saveLayoutState();
+  toast('任务已从会话列表移除');
+}
+async function closeSessionTaskSessions(task) {
+  try {
+    const current = state.sessionTask === task.id;
+    await api(`/tasks/${task.id}/terminate`, { method: 'POST' });
+    if (current) clearCurrentSessionSelection(task.id);
+    await refresh();
+    toast(`任务「${task.title}」下的全部子会话已关闭`);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+function handleSessionTaskAction(task) {
+  return sessionTaskHasRunningSessions(task) ? closeSessionTaskSessions(task) : hideSessionTask(task);
 }
 function hideSessionPath(path) {
   const tasks = sessionTasks().filter((task) => (task.workingDir || '未设置工作路径') === path);
   if (!tasks.length) return;
-  const runningTasks = tasks.filter((task) => task.piRunning || availableSessions(task).some((session) => session.running));
-  const runningCount = runningTasks.reduce((count, task) => count + runningSessionCount(task), 0);
-  const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
-  const applyHide = () => {
-    tasks.forEach((task) => {
-      state.sessionTaskIds.delete(task.id);
-      state.hiddenCompletedSessionTasks.add(task.id);
-    });
-    state.collapsedSessionPaths.delete(path);
-    if (tasks.some((task) => task.id === state.sessionTask)) {
-      leaveCurrentSession();
-      detachTui();
-      state.sessionTask = null;
-      state.sessionSessionId = null;
-    }
-    renderSessionTree();
-    saveLayoutState();
-    toast('工作路径已从会话列表移除');
-  };
-  if (!runningTasks.length) return applyHide();
-  const form = modal(`<h2>终止运行中的会话？</h2><p>工作路径「${esc(label)}」下有 ${runningCount} 个子会话正在运行。从会话列表移除此路径会终止这些会话，是否继续？</p><div class="modal-actions"><button type="button" class="danger" id="confirm-hide-session-path">终止并移除</button><button type="button" data-close>取消</button></div>`);
-  $('[data-close]', form).onclick = closeModal;
-  $('#confirm-hide-session-path', form).onclick = async () => {
-    const button = $('#confirm-hide-session-path', form);
-    button.disabled = true;
-    try {
-      await Promise.all(runningTasks.map((task) => api(`/tasks/${task.id}/terminate`, { method: 'POST' })));
-      closeModal();
-      applyHide();
-    } catch (error) {
-      button.disabled = false;
-      toast(error.message, 'error');
-    }
-  };
+  tasks.forEach((task) => {
+    state.sessionTaskIds.delete(task.id);
+    state.hiddenCompletedSessionTasks.add(task.id);
+  });
+  state.collapsedSessionPaths.delete(path);
+  if (tasks.some((task) => task.id === state.sessionTask)) {
+    leaveCurrentSession();
+    detachTui();
+    state.sessionTask = null;
+    state.sessionSessionId = null;
+  }
+  renderSessionTree();
+  saveLayoutState();
+  toast('工作路径已从会话列表移除');
+}
+async function closeSessionPathSessions(path) {
+  const tasks = sessionTasks().filter((task) => (task.workingDir || '未设置工作路径') === path);
+  const runningTasks = tasks.filter(sessionTaskHasRunningSessions);
+  if (!runningTasks.length) return hideSessionPath(path);
+  try {
+    const current = tasks.some((task) => task.id === state.sessionTask);
+    await Promise.all(runningTasks.map((task) => api(`/tasks/${task.id}/terminate`, { method: 'POST' })));
+    if (current) clearCurrentSessionSelection();
+    await refresh();
+    toast(`工作路径「${workingPathLabel(path === '未设置工作路径' ? '' : path)}」下的全部子会话已关闭`);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+function handleSessionPathAction(path) {
+  const tasks = sessionTasks().filter((task) => (task.workingDir || '未设置工作路径') === path);
+  return tasks.some(sessionTaskHasRunningSessions) ? closeSessionPathSessions(path) : hideSessionPath(path);
 }
 function markSessionRead(taskId, sessionId, { keepalive = false } = {}) {
   if (!taskId || !sessionId) return;
@@ -2327,20 +2511,28 @@ function closeThemeMenu() {
   menu.classList.add('hidden');
   $('#display-settings-toggle').setAttribute('aria-expanded', 'false');
 }
+const SESSION_TREE_GROUP_ICONS = {
+  task: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="15.5" width="16" height="4" rx="1"/></svg>',
+  path: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM3.5 7.5v-1a2 2 0 0 1 2-2h4l2 2h5"/></svg>',
+  combined: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h9M4 19h5M7 5v14M13 12v7M16 12h4M16 19h4"/></svg>',
+};
 function syncSessionTreeToolState() {
   const groupToggle = $('#session-tree-group-toggle');
   const searchToggle = $('#session-tree-search-toggle');
   const sortToggle = $('#session-tree-sort-toggle');
-  const groupMenu = $('#session-tree-group-menu');
   const searchPanel = $('#session-tree-search-panel');
   const sortMenu = $('#session-tree-sort-menu');
-  groupToggle?.classList.toggle('active', sessionTreeGroupOpen);
-  groupToggle?.setAttribute('aria-expanded', String(sessionTreeGroupOpen));
+  const groupLabels = { task: '按任务分类', path: '按工作路径分类', combined: '按融合分类' };
+  const mode = groupLabels[state.sessionTreeGroupMode] ? state.sessionTreeGroupMode : 'task';
+  const groupLabel = groupLabels[mode];
+  if (groupToggle) groupToggle.innerHTML = SESSION_TREE_GROUP_ICONS[mode];
+  groupToggle?.classList.toggle('active', mode === 'combined');
+  groupToggle?.setAttribute('title', `${groupLabel}（点击切换）`);
+  groupToggle?.setAttribute('aria-label', `${groupLabel}，点击切换`);
   searchToggle?.classList.toggle('active', sessionTreeSearchOpen || Boolean(sessionTreeQuery.trim()));
   searchToggle?.setAttribute('aria-expanded', String(sessionTreeSearchOpen));
   sortToggle?.classList.toggle('active', sessionTreeSortOpen);
   sortToggle?.setAttribute('aria-expanded', String(sessionTreeSortOpen));
-  groupMenu?.classList.toggle('hidden', !sessionTreeGroupOpen);
   searchPanel?.classList.toggle('hidden', !sessionTreeSearchOpen);
   sortMenu?.classList.toggle('hidden', !sessionTreeSortOpen);
   const input = $('#session-tree-search-input');
@@ -2348,35 +2540,37 @@ function syncSessionTreeToolState() {
   document.querySelectorAll('[data-session-sort]').forEach((button) => {
     button.setAttribute('aria-checked', String(button.dataset.sessionSort === sessionTreeSort));
   });
-  document.querySelectorAll('[data-session-group-mode]').forEach((button) => {
-    button.setAttribute('aria-checked', String(button.dataset.sessionGroupMode === state.sessionTreeGroupMode));
-  });
 }
 function closeSessionTreeTools() {
-  if (!sessionTreeGroupOpen && !sessionTreeSearchOpen && !sessionTreeSortOpen) return;
-  sessionTreeGroupOpen = false;
+  if (!sessionTreeSearchOpen && !sessionTreeSortOpen) return;
   sessionTreeSearchOpen = false;
   sessionTreeSortOpen = false;
   syncSessionTreeToolState();
 }
 function toggleSessionTreeSearch() {
   sessionTreeSearchOpen = !sessionTreeSearchOpen;
-  if (sessionTreeSearchOpen) { sessionTreeGroupOpen = false; sessionTreeSortOpen = false; }
+  if (sessionTreeSearchOpen) { sessionTreeSortOpen = false; }
   if (sessionTreeSearchOpen) closeThemeMenu();
   syncSessionTreeToolState();
   if (sessionTreeSearchOpen) requestAnimationFrame(() => $('#session-tree-search-input')?.focus());
 }
 function toggleSessionTreeSort() {
   sessionTreeSortOpen = !sessionTreeSortOpen;
-  if (sessionTreeSortOpen) { sessionTreeGroupOpen = false; sessionTreeSearchOpen = false; }
+  if (sessionTreeSortOpen) { sessionTreeSearchOpen = false; }
   if (sessionTreeSortOpen) closeThemeMenu();
   syncSessionTreeToolState();
 }
 function toggleSessionTreeGroup() {
-  sessionTreeGroupOpen = !sessionTreeGroupOpen;
-  if (sessionTreeGroupOpen) { sessionTreeSearchOpen = false; sessionTreeSortOpen = false; }
-  if (sessionTreeGroupOpen) closeThemeMenu();
+  const modes = ['task', 'path', 'combined'];
+  const current = modes.includes(state.sessionTreeGroupMode) ? state.sessionTreeGroupMode : 'task';
+  state.sessionTreeGroupMode = modes[(modes.indexOf(current) + 1) % modes.length];
+  sessionSwitchMenuOpen = null;
+  sessionTreeSearchOpen = false;
+  sessionTreeSortOpen = false;
+  closeThemeMenu();
+  renderSessionTree();
   syncSessionTreeToolState();
+  saveLayoutState();
 }
 let topbarNoteMenuAnchor = null;
 function openTopbarNotePanel(note) {
@@ -2441,10 +2635,6 @@ $('#display-settings-menu').onclick = (event) => {
 };
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#display-settings-toggle, #display-settings-menu')) closeThemeMenu();
-  if (!event.target.closest('#session-tree-group-toggle, #session-tree-group-menu')) {
-    sessionTreeGroupOpen = false;
-    syncSessionTreeToolState();
-  }
   if (!event.target.closest('#session-tree-search-toggle, #session-tree-search-panel')) {
     sessionTreeSearchOpen = false;
     syncSessionTreeToolState();
@@ -2537,15 +2727,6 @@ $('#session-tree-sort-menu').onclick = (event) => {
   sessionTreeSortOpen = false;
   renderSessionTree();
   syncSessionTreeToolState();
-};
-$('#session-tree-group-menu').onclick = (event) => {
-  const option = event.target.closest('[data-session-group-mode]');
-  if (!option || !['task', 'path'].includes(option.dataset.sessionGroupMode)) return;
-  state.sessionTreeGroupMode = option.dataset.sessionGroupMode;
-  sessionTreeGroupOpen = false;
-  renderSessionTree();
-  syncSessionTreeToolState();
-  saveLayoutState();
 };
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
@@ -2657,13 +2838,21 @@ document.addEventListener('pointerup', restoreTerminalFocusAfterSidebarInteracti
 document.addEventListener('click', restoreTerminalFocusAfterSidebarInteraction);
 function toggleSessionSwitchMenu(kind) {
   const task = currentTask(state.sessionTask);
-  if (kind === 'task' && !(state.sessionTreeGroupMode === 'path' ? sessionPathSwitchOptions().length : sessionTasksWithChildren().length)) return;
-  if (kind === 'session' && (!task || !availableSessions(task).length)) return;
+  const mode = state.sessionTreeGroupMode;
+  if (kind === 'path' && !['path', 'combined'].includes(mode)) return;
+  if (kind === 'path' && !sessionPathSwitchOptions().length) return;
+  if (kind === 'task' && mode === 'path') return;
+  if (kind === 'task' && !(mode === 'combined' ? sessionTasksWithChildrenForPath(task?.workingDir || '').length : sessionTasksWithChildren().length)) return;
+  if (kind === 'session' && (!task || !sessionSwitchEntries(task).length)) return;
   sessionActionMenuOpen = false;
   sessionTaskDetailsOpen = false;
   sessionSwitchMenuOpen = sessionSwitchMenuOpen === kind ? null : kind;
   renderSessionHeader();
 }
+$('#session-path-name').onclick = (event) => {
+  event.stopPropagation();
+  toggleSessionSwitchMenu('path');
+};
 $('#session-task-name').onclick = (event) => {
   event.stopPropagation();
   toggleSessionSwitchMenu('task');
@@ -2672,15 +2861,15 @@ $('#session-name').onclick = (event) => {
   event.stopPropagation();
   toggleSessionSwitchMenu('session');
 };
+$('#session-path-switch-menu').onclick = (event) => {
+  const option = event.target.closest('[data-session-switch-path]');
+  if (!option) return;
+  const entry = lastOpenedSessionForPath(option.dataset.sessionSwitchPath);
+  if (!entry) return;
+  sessionSwitchMenuOpen = null;
+  void selectSession(entry.task.id, entry.session.id);
+};
 $('#session-task-switch-menu').onclick = (event) => {
-  const pathOption = event.target.closest('[data-session-switch-path]');
-  if (pathOption) {
-    const entry = lastOpenedSessionForPath(pathOption.dataset.sessionSwitchPath);
-    if (!entry) return;
-    sessionSwitchMenuOpen = null;
-    void selectSession(entry.task.id, entry.session.id);
-    return;
-  }
   const option = event.target.closest('[data-session-switch-task]');
   if (!option) return;
   const task = currentTask(option.dataset.sessionSwitchTask);
@@ -2695,7 +2884,7 @@ $('#session-task-switch-menu').onclick = (event) => {
 $('#session-session-switch-menu').onclick = (event) => {
   const option = event.target.closest('[data-session-switch-session]');
   if (!option) return;
-  const task = currentTask(state.sessionTask);
+  const task = currentTask(option.dataset.sessionSwitchTask);
   const session = availableSessions(task).find((item) => item.id === option.dataset.sessionSwitchSession);
   if (!task || !session) return;
   sessionSwitchMenuOpen = null;
@@ -2906,6 +3095,31 @@ async function reconnectTreeSession(taskId, sessionId) {
   if (state.module !== 'session' || state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return selectSession(taskId, sessionId);
   return restartCurrentTui('正在重新连接会话…');
 }
+async function closeOrDeleteSession(task, sessionId) {
+  const session = availableSessions(task).find((item) => item.id === sessionId);
+  if (!session) return;
+  const current = state.sessionTask === task.id && state.sessionSessionId === sessionId;
+  try {
+    if (session.running) {
+      await api(`/tasks/${task.id}/sessions/${sessionId}/stop`, { method: 'POST' });
+      if (current) clearCurrentSessionSelection(task.id, sessionId);
+      await refresh();
+      return;
+    }
+    if (current) leaveCurrentSession();
+    await api(`/tasks/${task.id}/sessions/${sessionId}`, { method: 'DELETE' });
+    if (current) {
+      detachTui();
+      state.sessionTask = null;
+      state.sessionSessionId = null;
+    }
+    await refresh();
+    if (current) openSessionsBoard();
+    saveLayoutState();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
 async function toggleSessionFavorite(task, session) {
   try {
     await api(`/tasks/${task.id}/sessions/${session.id}`, { method: 'PATCH', body: { favorite: !session.favorite } });
@@ -2917,7 +3131,8 @@ async function toggleSessionFavorite(task, session) {
 $('#session-tree').onclick = (event) => {
   const create = event.target.closest('[data-new-session-task]');
   if (create) { const task = currentTask(create.dataset.newSessionTask); if (task) void createChildSession(task); return; }
-  if (event.target.closest('[data-new-session-path]')) { openNewSessionModal(); return; }
+  const createPath = event.target.closest('[data-new-session-path]');
+  if (createPath) { openNewSessionModal(createPath.dataset.newSessionPath); return; }
   const favorite = event.target.closest('[data-favorite-session-task]');
   if (favorite) {
     event.stopPropagation();
@@ -2929,17 +3144,26 @@ $('#session-tree').onclick = (event) => {
   const removeCompleted = event.target.closest('[data-remove-completed-task]');
   if (removeCompleted) {
     event.stopPropagation();
+    removeCompleted.blur();
     const task = currentTask(removeCompleted.dataset.removeCompletedTask);
-    if (task) hideSessionTask(task);
+    if (task) void handleSessionTaskAction(task);
     return;
   }
   const removePath = event.target.closest('[data-remove-session-path]');
   if (removePath) {
-    hideSessionPath(removePath.dataset.removeSessionPath);
+    event.stopPropagation();
+    removePath.blur();
+    void handleSessionPathAction(removePath.dataset.removeSessionPath);
     return;
   }
   const remove = event.target.closest('[data-delete-session]');
-  if (remove) { event.stopPropagation(); const task = currentTask(remove.dataset.deleteSession); if (task) openDeleteSessionModal(task, remove.dataset.sessionId); return; }
+  if (remove) {
+    event.stopPropagation();
+    remove.blur();
+    const task = currentTask(remove.dataset.deleteSession);
+    if (task) void closeOrDeleteSession(task, remove.dataset.sessionId);
+    return;
+  }
   const group = event.target.closest('[data-session-group]');
   if (group) {
     const id = group.dataset.sessionGroup;
@@ -3168,8 +3392,8 @@ taskEvents.onmessage = ({ data }) => {
   } catch { /* ignore malformed event */ }
 };
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') { stopMarqueeMotion(); return; }
-  renderMarquee();
+  if (document.visibilityState === 'hidden') { pauseMarqueeMotion(); return; }
+  resumeMarqueeMotion();
   if (state.module === 'session') void refresh();
 });
 window.addEventListener('pagehide', () => {
@@ -3177,5 +3401,6 @@ window.addEventListener('pagehide', () => {
   if (state.sessionTask) markSessionRead(state.sessionTask, state.sessionSessionId, { keepalive: true });
   taskEvents.close();
 }, { once: true });
+syncSessionTreeToolState();
 refresh();
 // SSE 是实时更新路径；不再对任务列表进行定时轮询，避免无必要地重绘任务卡片。

@@ -183,6 +183,34 @@ function resolveWorkingDir(value) {
   if (!path.isAbsolute(input)) return null;
   return path.normalize(input);
 }
+function resolveWorkingDirs(values) {
+  const source = Array.isArray(values) ? values : [values];
+  const raw = source.map((value) => String(value || '').trim()).filter(Boolean);
+  if (!raw.length) return null;
+  const resolved = raw.map(resolveWorkingDir);
+  if (resolved.some((value) => !value)) return null;
+  return [...new Set(resolved)];
+}
+function piSystemPrompt(task, workingDirs) {
+  const context = workingDirs.map((workingDir) => {
+    const contextFile = path.join(workingDir, 'AGENTS.md');
+    let content;
+    try {
+      content = readFileSync(contextFile, 'utf8');
+    } catch {
+      content = '(未找到或无法读取该文件)';
+    }
+    return `${contextFile}:\n${content}`;
+  }).join('\n\n');
+  return [
+    '## Task context',
+    `task title: ${task.title || ''}`,
+    `task description: ${task.description || ''}`,
+    '',
+    '## Project instructions',
+    context || '(没有配置项目路径)',
+  ].join('\n');
+}
 function concurrencyFull(extra = 0) {
   const runningTaskIds = new Set(listTasks().filter((task) => isWebTuiRunning(task.id)).map((task) => task.id));
   return config.maxConcurrent > 0 && runningTaskIds.size + extra > config.maxConcurrent;
@@ -210,10 +238,13 @@ async function openTaskTui(task, childSession, cols, rows, theme, { activateSess
   const sessionCwd = parseSessionFile(childSession.sessionFile).header?.cwd;
   const workingDir = resolveWorkingDir(sessionCwd || task.workingDir);
   if (!workingDir) throw new Error('请先为任务设置工作目录');
+  const workingDirs = (Array.isArray(task.workingDirs) ? task.workingDirs : [task.workingDir])
+    .map(resolveWorkingDir).filter(Boolean);
   mkdirSync(workingDir, { recursive: true });
   if (activateSession) activeSessionIds.set(task.id, childSession.id);
   const record = await startWebTui({
-    taskId: task.id, childSessionId: childSession.id, workingDir, sessionFile: childSession.sessionFile,
+    taskId: task.id, childSessionId: childSession.id, workingDir, workingDirs, sessionFile: childSession.sessionFile,
+    appendSystemPrompt: piSystemPrompt(task, workingDirs.length ? workingDirs : [workingDir]),
     title: childSession.title || task.title, provider: task.modelProvider, model: task.model,
     thinkingLevel: task.thinkingLevel, readOnly: task.readOnly, approve: config.approvePi !== false,
     cols, rows, theme: theme === 'dark' ? 'dark' : 'light',
@@ -365,9 +396,9 @@ app.get('/api/events', (req, res) => {
 app.post('/api/tasks', (req, res) => {
   const body = req.body || {};
   if (!String(body.title || '').trim()) return res.status(400).json({ error: '标题不能为空' });
-  const workingDir = resolveWorkingDir(body.workingDir);
-  if (!workingDir) return res.status(400).json({ error: '请选择工作目录' });
-  res.json({ task: publicTask(createTask({ ...body, workingDir })) });
+  const workingDirs = resolveWorkingDirs(Object.hasOwn(body, 'workingDirs') ? body.workingDirs : body.workingDir);
+  if (!workingDirs) return res.status(400).json({ error: '请选择工作目录' });
+  res.json({ task: publicTask(createTask({ ...body, workingDir: workingDirs[0], workingDirs })) });
 });
 app.put('/api/tasks/:id', (req, res) => {
   const task = getTask(req.params.id);
@@ -375,9 +406,11 @@ app.put('/api/tasks/:id', (req, res) => {
   if (task.status === 'archived') return res.status(409).json({ error: '废弃任务不能编辑' });
   const patch = {};
   for (const key of ['title', 'description', 'color', 'deadline']) if (key in (req.body || {})) patch[key] = req.body[key];
-  if ('workingDir' in (req.body || {})) {
-    patch.workingDir = resolveWorkingDir(req.body.workingDir);
-    if (!patch.workingDir) return res.status(400).json({ error: '请选择工作目录' });
+  if ('workingDirs' in (req.body || {}) || 'workingDir' in (req.body || {})) {
+    const workingDirs = resolveWorkingDirs(Object.hasOwn(req.body || {}, 'workingDirs') ? req.body.workingDirs : req.body.workingDir);
+    if (!workingDirs) return res.status(400).json({ error: '请选择工作目录' });
+    patch.workingDir = workingDirs[0];
+    patch.workingDirs = workingDirs;
   }
   if ('title' in patch && !String(patch.title).trim()) return res.status(400).json({ error: '标题不能为空' });
   if ('description' in patch) patch.description = String(patch.description || '').trim();
@@ -474,7 +507,8 @@ app.get('/api/tasks/:id/sessions', (req, res) => {
 app.post('/api/tasks/:id/sessions', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  if (task.status === 'archived') return res.status(409).json({ error: '废弃任务不能新建会话' });
+  // 回收站中的任务也允许从“打开会话”入口创建新的临时子会话；
+  // 新会话不参与任务恢复，任务仍保持废弃状态。
   const session = { id: randomUUID(), title: String(req.body?.title || '新会话').trim().slice(0, 80) || '新会话', sessionFile: path.join(SESSIONS_DIR, `${task.id}-${randomUUID()}.jsonl`), status: 'active', archivedAt: null, favorite: false, restorableWithTask: false, createdAt: nowIso(), updatedAt: nowIso() };
   const sessions = taskSessions(task);
   sessions.push(session);
@@ -566,6 +600,15 @@ app.post('/api/tasks/:id/tui/restart', async (req, res) => {
   const requestedSessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null;
   const stopped = await stopWebTuiForRestart(task.id, { sessionId: requestedSessionId || activeSessionIds.get(task.id) || null });
   res.json({ stopped });
+});
+app.post('/api/tasks/:id/sessions/:sessionId/stop', async (req, res) => {
+  const task = getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  const session = taskSessions(task).find((item) => item.id === req.params.sessionId);
+  if (!session) return res.status(404).json({ error: '子会话不存在' });
+  const stopped = await stopWebTuiForRestart(task.id, { sessionId: session.id });
+  if (stopped) notifyTaskChanged(task.id, 'session');
+  res.json({ stopped, task: publicTask(getTask(task.id)) });
 });
 app.post('/api/tasks/:id/terminate', async (req, res) => {
   const task = getTask(req.params.id);
