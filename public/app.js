@@ -432,7 +432,7 @@ function startMarqueeMotion(motion) {
   marqueeMotion = motion;
   const tick = (now) => {
     // 悬停只改变像素速度，不重置 transform，因此不会产生回跳或卡顿。
-    const speed = root.matches(':hover') ? 30 : 120;
+    const speed = root.matches(':hover') ? 30 : 90;
     motion.travel += Math.min(Math.max(0, now - motion.lastTime), 120) * speed / 1000;
     motion.lastTime = now;
     const first = track.firstElementChild;
