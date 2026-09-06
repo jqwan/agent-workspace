@@ -331,6 +331,17 @@ document.addEventListener('keydown', (event) => {
   void moveWorkspaceHistory(back ? -1 : 1);
 });
 window.addEventListener('resize', () => { syncViewportHeight(); syncMasonryColumns(); syncOverflowTooltips(); });
+// 详情栏展开/收起只改变主区宽度、不触发窗口 resize；监听主区尺寸变化重排看板与溢出提示。
+let mainResizeFrame = null;
+const mainResizeObserver = new ResizeObserver(() => {
+  if (mainResizeFrame !== null) return;
+  mainResizeFrame = requestAnimationFrame(() => {
+    mainResizeFrame = null;
+    syncMasonryColumns();
+    syncOverflowTooltips();
+  });
+});
+mainResizeObserver.observe(document.getElementById('workspace-main'));
 window.addEventListener('pagehide', saveLayoutState);
 window.visualViewport?.addEventListener('resize', syncViewportHeight);
 
@@ -341,6 +352,11 @@ function toast(message, type = '') {
   void api('/client-log', { method: 'POST', body: { message: text, type } }).catch(() => {});
 }
 function currentTask(id) { return state.tasks.find((task) => task.id === id); }
+function replaceTaskSnapshot(task) {
+  if (!task?.id) return;
+  const index = state.tasks.findIndex((item) => item.id === task.id);
+  if (index >= 0) state.tasks[index] = task;
+}
 function currentNote(id) { return state.notes.find((note) => note.id === id); }
 const LAST_OPENED_SESSION_KEY = 'workbench-last-opened-session';
 function rememberLastOpenedSession(taskId, sessionId) {
@@ -779,6 +795,7 @@ const ACTION_ICONS = {
   topbar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16M8 7h.01M11 7h.01"/></svg>',
   session: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 3z"/><path d="M8 9h8M8 12h5"/></svg>',
   task: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
+  info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.5h.01"/></svg>',
   chevronDown: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
 };
 function actionButton(action, id, label, iconName, className = '', pressed = null) {
@@ -790,12 +807,13 @@ function sessionActionButton(action, taskId, sessionId, label, iconName, classNa
   return `<button type="button" class="icon-button ${className}" data-action="${action}" data-task-id="${esc(taskId)}" data-session-id="${esc(sessionId)}" title="${label}" aria-label="${label}"${pressedAttribute}>${ACTION_ICONS[iconName]}</button>`;
 }
 function actions(task) {
-  if (task.status === 'archived') return `${actionButton('open-archived-session', task.id, '打开会话', 'open', 'primary')}${actionButton('restore', task.id, '恢复任务', 'restore')}${actionButton('purge', task.id, '永久删除', 'purge', 'danger')}`;
+  if (task.status === 'archived') return `${actionButton('restore', task.id, '恢复任务', 'restore')}${actionButton('purge', task.id, '永久删除', 'purge', 'danger')}`;
+  const detailButton = actionButton('task-detail', task.id, '任务详情', 'info', 'card-detail-button');
   if (task.status === 'unfinished') {
     const openAction = availableSessions(task).length ? 'session' : 'execute';
-    return `${actionButton(openAction, task.id, '打开会话', 'open', 'primary')}${actionButton('complete', task.id, '标记完成', 'complete')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
+    return `${actionButton(openAction, task.id, '打开会话', 'open', 'primary')}${actionButton('complete', task.id, '标记完成', 'complete')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}${detailButton}`;
   }
-  if (task.status === 'done') return `${actionButton('session', task.id, '打开会话', 'open', 'primary')}${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
+  if (task.status === 'done') return `${actionButton('session', task.id, '打开会话', 'open', 'primary')}${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('edit', task.id, '编辑', 'edit')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}${detailButton}`;
   return `${actionButton('reopen', task.id, '重开任务', 'reopen')}${actionButton('delete', task.id, '删除', 'delete', 'danger')}`;
 }
 function card(task, compact = false) {
@@ -833,7 +851,7 @@ function noteCard(note, compact = false) {
   const archiveInfo = note.status === 'archived' ? `<div class="archive-info">废弃${note.archivedAt ? ` · ${time(note.archivedAt)}` : ''}</div>` : '';
   const actionsHtml = note.status === 'archived'
     ? `${actionButton('restore-note', note.id, '恢复便签', 'restore')}${actionButton('purge-note', note.id, '永久删除便签', 'purge', 'danger')}`
-    : `${actionButton('edit-note', note.id, '编辑便签', 'edit')}${actionButton('toggle-top-note', note.id, note.pinnedToTopBar ? '取消提醒标记' : '提醒标记', 'topbar', note.pinnedToTopBar ? 'note-pin-active' : '', note.pinnedToTopBar)}${actionButton('toggle-session-note', note.id, note.pinnedToSessionBar ? '取消会话标记' : '会话标记', 'session', note.pinnedToSessionBar ? 'note-pin-active' : '', note.pinnedToSessionBar)}${actionButton('delete-note', note.id, '废弃便签', 'delete', 'danger')}`;
+    : `${actionButton('edit-note', note.id, '编辑便签', 'edit')}${actionButton('toggle-top-note', note.id, note.pinnedToTopBar ? '取消提醒标记' : '提醒标记', 'topbar', note.pinnedToTopBar ? 'note-pin-active' : '', note.pinnedToTopBar)}${actionButton('toggle-session-note', note.id, note.pinnedToSessionBar ? '取消会话标记' : '会话标记', 'session', note.pinnedToSessionBar ? 'note-pin-active' : '', note.pinnedToSessionBar)}${actionButton('delete-note', note.id, '废弃便签', 'delete', 'danger')}${actionButton('note-detail', note.id, '便签详情', 'info', 'card-detail-button')}`;
   return `<article class="card note-card${note.status === 'archived' ? ' archived' : ''} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row">${title ? `<h3 class="card-title" data-tooltip="${esc(title)}">${esc(title)}</h3>` : '<span class="spacer"></span>'}${title ? '<span class="spacer"></span>' : ''}${deadlineText}</div></div></div><p class="card-desc" data-tooltip="${esc(note.description)}">${esc(note.description)}</p>${archiveInfo}<div class="card-actions">${actionsHtml}</div></article>`;
 }
 const NOTE_CATEGORY_GROUPS = [
@@ -1021,14 +1039,17 @@ function sessionCard(entry, compact = false) {
   let actionsHtml;
   if (isArchived) {
     const restoreState = session.restorableWithTask ? '可随任务恢复' : '不可随任务恢复';
-    const restoreTitle = session.restorableWithTask ? '恢复任务时将一并恢复此会话' : '该会话不会随任务恢复';
+    const nextRestoreState = session.restorableWithTask ? '不可随任务恢复' : '可随任务恢复';
+    const restoreTitle = `点击切换为${nextRestoreState}`;
     const openButton = taskArchived ? '' : sessionActionButton('open-session-card', task.id, session.id, '打开会话（恢复并进入）', 'open', 'primary');
-    const stateLabel = taskArchived ? `<span class="session-restore-state" title="${restoreTitle}">${restoreState}</span>` : '';
+    const stateLabel = taskArchived
+      ? `<button type="button" class="session-restore-state" data-action="toggle-session-restorable" data-task-id="${esc(task.id)}" data-session-id="${esc(session.id)}" title="${restoreTitle}" aria-label="${restoreState}，${restoreTitle}" aria-pressed="${Boolean(session.restorableWithTask)}">${restoreState}</button>`
+      : '';
     actionsHtml = `${openButton}${stateLabel}${sessionActionButton('purge-session', task.id, session.id, '永久删除会话', 'purge', 'danger')}`;
   } else {
     const favoriteLabel = session.favorite ? '取消收藏' : '收藏';
     const favoriteClass = session.favorite ? 'note-pin-active' : '';
-    actionsHtml = `${sessionActionButton('open-session-card', task.id, session.id, '打开会话', 'open', 'primary')}${sessionActionButton('toggle-session-favorite', task.id, session.id, favoriteLabel, 'star', favoriteClass, session.favorite)}${sessionActionButton('rename-session', task.id, session.id, '重命名会话', 'edit')}${sessionActionButton('delete-session-card', task.id, session.id, '删除会话', 'delete', 'danger')}`;
+    actionsHtml = `${sessionActionButton('open-session-card', task.id, session.id, '打开会话', 'open', 'primary')}${sessionActionButton('toggle-session-favorite', task.id, session.id, favoriteLabel, 'star', favoriteClass, session.favorite)}${sessionActionButton('rename-session', task.id, session.id, '重命名会话', 'edit')}${sessionActionButton('delete-session-card', task.id, session.id, '删除会话', 'delete', 'danger')}${sessionActionButton('session-detail', task.id, session.id, '会话详情', 'info', 'card-detail-button')}`;
   }
   return `<article class="card session-card${isArchived ? ' archived' : ''} color-${colorKey}${customClass}${compact ? ' compact' : ''}"${customColorStyle(colorKey)}><div class="card-head"><div class="card-heading"><div class="card-title-row">${stateIcon}<h3 class="card-title" data-tooltip="${esc(title)}">${esc(title)}</h3></div><div class="session-card-task" data-tooltip="${esc(task.workingDir || '未设置工作路径')}">${ACTION_ICONS.folder} ${esc(task.workingDir || '未设置工作路径')}</div></div></div><p class="card-desc" data-tooltip="${esc(summary)}">${esc(summary)}</p><div class="session-card-meta"><span data-tooltip="${esc(task.title)}">${ACTION_ICONS.task} ${esc(task.title)}</span><span>${ACTION_ICONS.clock} 更新于 ${time(session.updatedAt)}</span></div>${isArchived ? `<div class="archive-info">废弃 · ${time(session.archivedAt)}</div>` : ''}<div class="card-actions">${actionsHtml}</div></article>`;
 }
@@ -1082,7 +1103,9 @@ function showSessionTask(taskId) {
   saveLayoutState();
 }
 function sessionTasks() {
-  return state.tasks.filter((task) => (availableSessions(task).length > 0 || state.sessionTaskIds.has(task.id)) && !state.hiddenCompletedSessionTasks.has(task.id));
+  return state.tasks.filter((task) => task.status !== 'archived'
+    && (availableSessions(task).length > 0 || state.sessionTaskIds.has(task.id))
+    && !state.hiddenCompletedSessionTasks.has(task.id));
 }
 function sessionTreeText(value) {
   return String(value || '').trim().toLocaleLowerCase('zh-CN');
@@ -1103,8 +1126,13 @@ function sessionTreeCompareText(a, b) {
   return sessionTreeText(a).localeCompare(sessionTreeText(b), 'zh-CN', { numeric: true, sensitivity: 'base' });
 }
 function sessionTreeCompareTasks(a, b) {
+  const statusOrder = { unfinished: 0, done: 1, archived: 2 };
+  let result = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+  if (result) return result;
+  // 同一状态下始终优先最近更新的任务；用户选择的排序仅作为后续细分规则。
+  result = sessionTreeLatestUpdate(b) - sessionTreeLatestUpdate(a);
+  if (result) return result;
   const option = sessionTreeSort;
-  let result = 0;
   if (option === 'created') result = sessionTreeTime(b.createdAt) - sessionTreeTime(a.createdAt);
   else if (option === 'updated') result = sessionTreeLatestUpdate(b) - sessionTreeLatestUpdate(a);
   else if (option === 'title') result = sessionTreeCompareText(a.title, b.title);
@@ -1112,9 +1140,6 @@ function sessionTreeCompareTasks(a, b) {
   else if (option === 'color') {
     const colors = Object.keys(colorCatalog());
     result = (colors.indexOf(taskColor(a)) + 1 || Number.MAX_SAFE_INTEGER) - (colors.indexOf(taskColor(b)) + 1 || Number.MAX_SAFE_INTEGER);
-  } else if (option === 'status') {
-    const statusOrder = { unfinished: 0, done: 1, archived: 2 };
-    result = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
   }
   return result || sessionTreeCompareText(a.title, b.title) || String(a.id || '').localeCompare(String(b.id || ''));
 }
@@ -1506,6 +1531,7 @@ async function refresh() {
     renderStats(); renderTaskSidebar(); renderSessionTree();
     if (signature !== state.signature && !$('.modal')) renderList();
     state.signature = signature;
+    syncDetailPanel();
     if (!layoutInitialized) {
       layoutInitialized = true;
       if (state.module === 'session') {
@@ -1872,7 +1898,10 @@ function closeModal() {
 }
 document.addEventListener('keydown', (event) => {
   const dialog = $('.modal');
-  if (!dialog) return;
+  if (!dialog) {
+    if (event.key === 'Escape' && $('#detail-panel')?.classList.contains('open')) { event.preventDefault(); closeDetailPanel(); }
+    return;
+  }
   if (event.key === 'Escape') { event.preventDefault(); closeModal(); return; }
   if (event.key !== 'Tab') return;
   const focusable = [...dialog.querySelectorAll('button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])')].filter((node) => !node.disabled && node.offsetParent !== null);
@@ -1890,10 +1919,36 @@ function setFieldError(form, inputId, message = '') {
   error.textContent = message;
   error.classList.toggle('hidden', !message);
 }
+// 新建/编辑弹窗共用的 AI 优化：把当前标题和描述交给后端 pi 梳理后原位替换。
+function bindAiPolish(form, { type, titleId, descId, buttonId }) {
+  const button = $(`#${buttonId}`, form);
+  if (!button) return;
+  const label = button.textContent;
+  button.onclick = async () => {
+    if (button.disabled) return;
+    const titleInput = $(`#${titleId}`, form);
+    const descInput = $(`#${descId}`, form);
+    if (!titleInput.value.trim() && !descInput.value.trim()) { toast('请先输入标题或描述', 'error'); return; }
+    button.disabled = true;
+    button.textContent = '优化中…';
+    try {
+      const result = await api('/ai/polish', { method: 'POST', body: { type, title: titleInput.value, description: descInput.value } });
+      if (result.title) titleInput.value = result.title;
+      if (result.description) descInput.value = result.description;
+      toast('已应用 AI 优化');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  };
+}
 function openNoteForm(note = null, options = {}) {
   const editing = Boolean(note);
-  const form = modal(`<h2>${editing ? '编辑便签' : '新建便签'}</h2><label for="note-title">标题（可选）<input id="note-title" autocomplete="off" value="${esc(note?.title || '')}"></label><label for="note-desc">描述<textarea id="note-desc" autocomplete="off" rows="5">${esc(note?.description || '')}</textarea><span class="field-error hidden" data-error-for="note-desc" role="alert"></span></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="note-color-trigger" class="color-trigger" aria-expanded="false" aria-controls="note-color-picker"><span id="note-color-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="note-color-label"></span></button><div id="note-color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="note-custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="note-color" value="${taskColor(note || {})}"></label><label for="note-deadline">截止<input id="note-deadline" type="datetime-local" value="${esc(note?.deadline || '')}"></label></div><label class="note-switch"><input id="note-topbar" type="checkbox"${(note?.pinnedToTopBar || options.pinnedToTopBar) ? ' checked' : ''}> 是否启用提醒标记</label><label class="note-switch"><input id="note-sessionbar" type="checkbox"${(note?.pinnedToSessionBar || options.pinnedToSessionBar) ? ' checked' : ''}> 是否启用会话标记</label><div class="modal-actions"><button type="button" class="primary" id="save-note">${editing ? '保存' : '创建'}</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>${editing ? '编辑便签' : '新建便签'}</h2><label for="note-title"><span class="field-label-row"><span>标题（可选）</span><button type="button" id="note-ai-polish" class="ai-polish-button" title="让 AI 梳理优化标题和描述">✦ AI 优化</button></span><input id="note-title" aria-label="标题（可选）" autocomplete="off" value="${esc(note?.title || '')}"></label><label for="note-desc">描述<textarea id="note-desc" autocomplete="off" rows="5">${esc(note?.description || '')}</textarea><span class="field-error hidden" data-error-for="note-desc" role="alert"></span></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="note-color-trigger" class="color-trigger" aria-expanded="false" aria-controls="note-color-picker"><span id="note-color-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="note-color-label"></span></button><div id="note-color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="note-custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="note-color" value="${taskColor(note || {})}"></label><label for="note-deadline">截止<input id="note-deadline" type="datetime-local" value="${esc(note?.deadline || '')}"></label></div><label class="note-switch"><input id="note-topbar" type="checkbox"${(note?.pinnedToTopBar || options.pinnedToTopBar) ? ' checked' : ''}> 是否启用提醒标记</label><label class="note-switch"><input id="note-sessionbar" type="checkbox"${(note?.pinnedToSessionBar || options.pinnedToSessionBar) ? ' checked' : ''}> 是否启用会话标记</label><div class="modal-actions"><button type="button" class="primary" id="save-note">${editing ? '保存' : '创建'}</button><button type="button" data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
+  bindAiPolish(form, { type: 'note', titleId: 'note-title', descId: 'note-desc', buttonId: 'note-ai-polish' });
   const colorPicker = $('#note-color-picker', form);
   const colorTrigger = $('#note-color-trigger', form);
   const customInput = $('#note-custom-color-value', form);
@@ -1962,8 +2017,9 @@ function openTaskForm(task = null, options = {}) {
   const workingDirEditable = true;
   const workingDirHint = task ? '（仅新会话使用这些路径）' : '';
   const workingDirReadonly = workingDirEditable ? '' : ' disabled';
-  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title">标题<input id="task-title" name="title" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label>工作目录${workingDirHint}<div id="task-working-dirs" class="task-working-dirs"></div><button type="button" id="add-task-working-dir" class="add-working-dir hidden">＋ 添加子路径</button><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div>${openSessionOption}<div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>${task ? '编辑任务' : '新建任务'}</h2><label for="task-title"><span class="field-label-row"><span>标题</span><button type="button" id="task-ai-polish" class="ai-polish-button" title="让 AI 梳理优化标题和描述">✦ AI 优化</button></span><input id="task-title" name="title" aria-label="标题" autocomplete="off" value="${esc(task?.title || '')}"><span class="field-error hidden" data-error-for="task-title" role="alert"></span></label><label>工作目录${workingDirHint}<div id="task-working-dirs" class="task-working-dirs"></div><button type="button" id="add-task-working-dir" class="add-working-dir hidden">＋ 添加子路径</button><span class="field-error hidden" data-error-for="task-working-dir" role="alert"></span></label><label for="task-desc">描述<textarea id="task-desc" name="description" autocomplete="off" rows="4">${esc(task?.description || '')}</textarea></label><div class="row"><label>颜色<div class="color-selector"><button type="button" id="color-trigger" class="color-trigger" aria-expanded="false" aria-controls="color-picker"><span id="color-trigger-swatch" class="color-trigger-swatch" aria-hidden="true"></span><span id="color-trigger-label"></span></button><div id="color-picker" class="color-picker hidden" role="group" aria-label="颜色选项"></div><input id="custom-color-value" class="color-native-input" type="color" aria-label="新增颜色" value="#E85F32"></div><input type="hidden" id="task-color" name="color" value="${taskColor(task || {})}"></label><label for="task-deadline">截止<input id="task-deadline" name="deadline" type="datetime-local" value="${esc(task?.deadline || '')}"></label></div>${openSessionOption}<div class="modal-actions"><button type="button" class="primary" id="save-task">${saveLabel}</button><button type="button" data-close>取消</button></div>`);
   $('[data-close]', form).onclick = closeModal;
+  bindAiPolish(form, { type: 'task', titleId: 'task-title', descId: 'task-desc', buttonId: 'task-ai-polish' });
   const colorPicker = $('#color-picker', form);
   const colorTrigger = $('#color-trigger', form);
   const customColorValue = $('#custom-color-value', form);
@@ -2120,17 +2176,11 @@ function openTaskForm(task = null, options = {}) {
 async function restoreTask(task) {
   const result = await api(`/tasks/${task.id}/restore`, { method: 'POST' });
   // 保留当前回收站视图；刷新后恢复的卡片会从回收站列表中消失。
-  // 恢复只改变任务状态；保持任务在会话列表中的原有展示状态。
+  // 恢复子会话，但不跳转会话界面，也不自动创建或启动子会话。
+  showSessionTask(task.id);
   await refresh();
   saveLayoutState();
   return currentTask(task.id) || result.task;
-}
-async function openTaskSession(task) {
-  showSessionTask(task.id);
-  const sessions = Array.isArray(task.sessions) ? task.sessions : [];
-  const session = sessions.find((item) => item.id === task.activeSessionId) || sessions[0];
-  if (session) await selectSession(task.id, session.id);
-  else await openExecute(task);
 }
 function runningSessionCount(task) {
   return availableSessions(task).filter((session) => session.running).length || (task.piRunning ? 1 : 0);
@@ -2178,6 +2228,223 @@ async function openExecute(task) {
     await refresh(); switchModule('session'); selectSession(task.id, result.session.id);
     toast(task.description ? '已打开会话，请在 pi 输入框中发送任务描述。' : '已打开会话。');
   } catch (error) { toast(error.message, 'error'); }
+}
+// 右侧详情栏：标题栏和内容区是布局第三列上的两个网格项，标题栏与顶栏同行等高，
+// 展开时把中间看板/终端区连同顶部栏一起向左推。
+let detailPanelView = null;
+function ensureDetailPanel() {
+  let head = document.getElementById('detail-panel');
+  let body = document.getElementById('detail-panel-body');
+  if (!head) {
+    const layout = document.getElementById('workbench-layout') || document.body;
+    head = document.createElement('aside');
+    head.id = 'detail-panel';
+    head.className = 'detail-panel';
+    head.setAttribute('aria-hidden', 'true');
+    body = document.createElement('section');
+    body.id = 'detail-panel-body';
+    body.className = 'detail-panel-body-wrap';
+    body.setAttribute('aria-hidden', 'true');
+    layout.append(head, body);
+  }
+  return { head, body };
+}
+function setDetailPanelOpen(open) {
+  const { head, body } = ensureDetailPanel();
+  for (const el of [head, body]) {
+    el.classList.toggle('open', open);
+    el.setAttribute('aria-hidden', String(!open));
+  }
+}
+function openDetailPanel(title, bodyHtml, { actionsHtml = '', preserveScroll = false } = {}) {
+  const { head, body } = ensureDetailPanel();
+  const scrollTop = preserveScroll ? body.scrollTop : 0;
+  head.innerHTML = `<div class="detail-panel-head-inner"><h2 title="${title}">${title}</h2><div class="detail-panel-head-actions">${actionsHtml}<button type="button" class="icon-button detail-panel-close" aria-label="收起详情" title="收起详情">${ACTION_ICONS.close}</button></div></div>`;
+  body.innerHTML = `<div class="detail-panel-body">${bodyHtml}</div>`;
+  $('.detail-panel-close', head).onclick = closeDetailPanel;
+  body.scrollTop = scrollTop;
+  setDetailPanelOpen(true);
+}
+function closeDetailPanel() {
+  detailPanelView = null;
+  setDetailPanelOpen(false);
+}
+// 数据刷新后重绘已打开的详情；生成日志期间跳过，避免打断按钮状态。
+function syncDetailPanel() {
+  if (!detailPanelView || detailPanelView.busy || !$('#detail-panel')?.classList.contains('open')) return;
+  const { type, id, taskId, sessionId } = detailPanelView;
+  if (type === 'task') {
+    const task = currentTask(id);
+    if (task) openTaskDetailPanel(task, { preserveScroll: true });
+  } else if (type === 'note') {
+    const note = currentNote(id);
+    if (note) openNoteDetailPanel(note);
+  } else if (type === 'session') {
+    const task = currentTask(taskId);
+    const session = task?.sessions?.find((item) => item.id === sessionId);
+    if (task && session) openSessionDetailPanel(task, session, { preserveScroll: true });
+  }
+}
+function taskDetailLogs(logs, emptyHint) {
+  return logs.length
+    ? logs.map((log) => `<div class="task-log-entry"><div class="task-log-time">${time(log.createdAt)}</div><div class="task-log-content">${esc(log.content)}</div></div>`).join('')
+    : `<div class="task-log-empty">${emptyHint}</div>`;
+}
+function detailColorSpan(colorKey) {
+  const color = colorCatalog()[colorKey];
+  if (!color) return '默认';
+  return `<span class="detail-color-swatch" style="--swatch:${esc(color.value)}"></span> ${esc(color.label)}`;
+}
+function hasSessionLog(session) {
+  return Boolean(session?.log?.content);
+}
+function openClearTaskLogsModal(task) {
+  const form = modal(`<h2>清除任务日志</h2><p>确定清除任务「${esc(task.title)}」及其全部子会话的 AI 日志吗？对话内容不会删除，清除后需重新生成才能恢复。</p><div class="modal-actions"><button type="button" class="danger" id="confirm-clear-task-logs">清除日志</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-clear-task-logs', form).onclick = async () => {
+    try {
+      await api(`/tasks/${task.id}/logs`, { method: 'DELETE' });
+      closeModal();
+      toast('任务及其子会话的日志已清除');
+      await refresh();
+    } catch (error) { toast(error.message, 'error'); }
+  };
+}
+function openClearSessionLogModal(task, session) {
+  const form = modal(`<h2>清除会话日志</h2><p>确定清除会话「${esc(session.title || '新会话')}」的 AI 日志吗？对话内容不会删除，清除后需重新生成才能恢复。</p><div class="modal-actions"><button type="button" class="danger" id="confirm-clear-session-log">清除日志</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-clear-session-log', form).onclick = async () => {
+    try {
+      await api(`/tasks/${task.id}/sessions/${session.id}/log`, { method: 'DELETE' });
+      closeModal();
+      toast('会话日志已清除');
+      await refresh();
+    } catch (error) { toast(error.message, 'error'); }
+  };
+}
+function openTaskDetailPanel(task, options = {}) {
+  detailPanelView = { type: 'task', id: task.id, ...options };
+  const render = (current, preserveScroll = Boolean(options.preserveScroll)) => {
+    const logs = Array.isArray(current.logs) ? current.logs : [];
+    const dirs = (Array.isArray(current.workingDirs) && current.workingDirs.length ? current.workingDirs : [current.workingDir]).filter(Boolean);
+    const description = current.description?.trim();
+    const sessions = availableSessions(current);
+    const runningCount = sessions.filter((session) => session.running).length;
+    const modelParts = [current.modelProvider, current.model, current.thinkingLevel].filter(Boolean);
+    const model = modelParts.length ? modelParts.join(' · ') : '默认模型';
+    const meta = `<div class="task-detail-meta"><span>状态：${esc(STATUS[current.status]?.label || '未知')}</span><span>颜色：${detailColorSpan(taskColor(current))}</span><span>截止：${current.deadline ? `${esc(deadline(current.deadline))}${current.overdue ? ' · 逾期' : ''}` : '未设置'}</span><span>子会话：${sessions.length} 个${runningCount ? `（${runningCount} 个运行中）` : ''}</span><span>模型：${esc(model)}</span><span>创建：${time(current.createdAt)}</span><span>更新：${time(current.updatedAt)}</span>${current.completedAt ? `<span>完成：${time(current.completedAt)}</span>` : ''}</div>`;
+    const sessionRows = sessions.length
+      ? sessions.map((session) => {
+        const stats = session.stats;
+        const statText = stats?.messages ? `消息 ${number(stats.messages)} · 用户 ${number(stats.user)} / 助手 ${number(stats.assistant)} · 输出 ${compactNumber(stats.output)} token` : '尚无消息';
+        const logState = session.log?.content ? `已凝练 · ${time(session.log.generatedAt)}` : '未凝练';
+        return `<button type="button" class="detail-session-row" data-session-id="${esc(session.id)}" title="查看会话详情"><span class="detail-session-main"><span class="detail-session-title">${session.running ? '● ' : ''}${esc(session.title || '新会话')}</span><span class="detail-session-meta">${statText} · ${logState}</span></span><span class="detail-session-go" aria-hidden="true">›</span></button>`;
+      }).join('')
+      : '<div class="task-log-empty">还没有子会话。</div>';
+    const editable = current.status !== 'archived';
+    const hasAnyLogs = logs.length > 0 || (current.sessions || []).some(hasSessionLog);
+    const taskLogActions = editable ? `<button type="button" id="task-log-generate" class="ai-polish-button" title="AI 汇总全部子会话生成任务日志">✦ 生成日志</button>${hasAnyLogs ? '<button type="button" id="task-log-clear" class="ai-polish-button danger" title="清除本任务及全部子会话的日志记录（对话内容不受影响）">清除日志</button>' : ''}` : '';
+    const body = `${meta}${dirs.length ? `<div class="task-detail-dirs">${dirs.map((dir) => `<span>${ACTION_ICONS.folder} ${esc(dir)}</span>`).join('')}</div>` : ''}${description ? `<div class="task-detail-desc">${esc(description)}</div>` : ''}<div class="task-detail-logs-head"><b>子会话</b></div><div class="detail-session-list">${sessionRows}</div><div class="task-detail-logs-head"><b>任务日志</b>${taskLogActions ? `<span class="task-log-head-actions">${taskLogActions}</span>` : ''}</div><div class="task-log-list">${taskDetailLogs(logs, '还没有日志。点击「生成日志」，AI 会在一次对话中补写缺失的会话日志并汇总成任务日志。')}</div>`;
+    openDetailPanel(esc(current.title), body, { preserveScroll });
+    const { body: panelBody } = ensureDetailPanel();
+    panelBody.querySelectorAll('.detail-session-row').forEach((row) => {
+      row.onclick = () => {
+        const session = sessions.find((item) => item.id === row.dataset.sessionId);
+        if (session) openSessionDetailPanel(current, session);
+      };
+    });
+    const generateButton = $('#task-log-generate');
+    if (generateButton) {
+      const generateLabel = generateButton.textContent;
+      generateButton.onclick = async () => {
+        if (generateButton.disabled) return;
+        generateButton.disabled = true;
+        generateButton.textContent = '生成中…';
+        detailPanelView.busy = true;
+        try {
+          suppressLocalTaskEvent(current.id);
+          const result = await api(`/tasks/${current.id}/logs`, { method: 'POST', body: {} });
+          if (result.skipped) consumeLocalTaskEvent(current.id);
+          toast(result.skipped ? '没有新的会话内容，未重新生成任务日志' : '任务日志已生成');
+          replaceTaskSnapshot(result.task);
+          render(result.task, true);
+        } catch (error) {
+          toast(error.message, 'error');
+          consumeLocalTaskEvent(current.id);
+          generateButton.disabled = false;
+          generateButton.textContent = generateLabel;
+        } finally {
+          if (detailPanelView) detailPanelView.busy = false;
+        }
+      };
+    }
+    const clearButton = $('#task-log-clear');
+    if (clearButton) clearButton.onclick = () => openClearTaskLogsModal(current);
+  };
+  render(task);
+}
+function openNoteDetailPanel(note, options = {}) {
+  detailPanelView = { type: 'note', id: note.id, ...options };
+  const meta = `<div class="task-detail-meta"><span>状态：${note.status === 'archived' ? '废弃' : '正常'}</span><span>颜色：${detailColorSpan(taskColor(note))}</span><span>截止：${note.deadline ? `${esc(deadline(note.deadline))}${note.overdue ? ' · 逾期' : ''}` : '未设置'}</span><span>提醒标记：${note.pinnedToTopBar ? '开' : '关'}</span><span>会话标记：${note.pinnedToSessionBar ? '开' : '关'}</span><span>创建：${time(note.createdAt)}</span><span>更新：${time(note.updatedAt)}</span>${note.archivedAt ? `<span>废弃：${time(note.archivedAt)}</span>` : ''}</div>`;
+  const body = `${meta}<div class="task-detail-logs-head"><b>描述</b></div><div class="task-detail-desc">${esc(note.description)}</div>`;
+  openDetailPanel(esc(note.title?.trim() || '便签详情'), body, { actionsHtml: note.status !== 'archived' ? '<button type="button" id="note-detail-edit" class="detail-edit-button">编辑</button>' : '', preserveScroll: Boolean(options.preserveScroll) });
+  $('#note-detail-edit')?.addEventListener('click', () => openNoteForm(note));
+}
+function openSessionDetailPanel(task, session, options = {}) {
+  detailPanelView = { type: 'session', taskId: task.id, sessionId: session.id, ...options };
+  const render = (currentTask, currentSession, preserveScroll = Boolean(options.preserveScroll)) => {
+    const stats = currentSession.stats;
+    const running = currentSession.running || currentTask.piRunning;
+    let sessionState = '已结束';
+    if (currentSession.status === 'archived') sessionState = '废弃';
+    else if (running) sessionState = '运行中';
+    const meta = `<div class="task-detail-meta"><span class="detail-session-task"><span>所属任务：</span><button type="button" id="session-task-detail" class="detail-session-task-link" title="查看任务详情">${esc(currentTask.title)}</button></span><span>状态：${sessionState}</span><span>收藏：${currentSession.favorite ? '是' : '否'}</span><span>创建：${time(currentSession.createdAt)}</span><span>更新：${time(currentSession.updatedAt)}</span></div>`;
+    const statRows = stats ? [
+      `<span>总消息：${number(stats.messages)}</span>`,
+      `<span>用户 / 助手：${number(stats.user)} / ${number(stats.assistant)}</span>`,
+      `<span>工具调用：${number(stats.toolResults)}</span>`,
+      `<span>输入 / 输出：${compactNumber(stats.input)} / ${compactNumber(stats.output)} token</span>`,
+      `<span>缓存读 / 写：${compactNumber(stats.cacheRead)} / ${compactNumber(stats.cacheWrite)}</span>`,
+      stats.errors ? `<span>错误：${number(stats.errors)}</span>` : '',
+    ].filter(Boolean).join('') : '<span>该会话还没有消息记录。</span>';
+    const log = currentSession.log;
+    const logList = log?.content
+      ? `<div class="task-log-entry"><div class="task-log-time">凝练于 ${time(log.generatedAt)}</div><div class="task-log-content">${esc(log.content)}</div></div>`
+      : '<div class="task-log-empty">还没有会话日志。点击「生成日志」，AI 会凝练该会话记录；再次生成时只补充上次凝练位置之后的新内容。</div>';
+    const canLog = currentSession.status !== 'archived';
+    const canClearLog = hasSessionLog(currentSession);
+    const body = `${meta}<div class="task-detail-dirs"><span>${ACTION_ICONS.folder} ${esc(currentTask.workingDir || '未设置工作路径')}</span></div><div class="task-detail-logs-head"><b>会话统计</b></div><div class="task-detail-meta">${statRows}</div><div class="task-detail-logs-head"><b>会话日志</b>${canLog ? `<span class="task-log-head-actions"><button type="button" id="session-log-generate" class="ai-polish-button" title="AI 凝练该会话记录生成日志">✦ 生成日志</button>${canClearLog ? '<button type="button" id="session-log-clear" class="ai-polish-button danger" title="清除本会话的日志记录（对话内容不受影响）">清除日志</button>' : ''}</span>` : ''}</div><div class="task-log-list">${logList}</div>`;
+    openDetailPanel(esc(currentSession.title || '新会话'), body, { preserveScroll });
+    const generateButton = $('#session-log-generate');
+    $('#session-task-detail')?.addEventListener('click', () => openTaskDetailPanel(currentTask));
+    $('#session-log-clear')?.addEventListener('click', () => openClearSessionLogModal(currentTask, currentSession));
+    if (generateButton) {
+      const generateLabel = generateButton.textContent;
+      generateButton.onclick = async () => {
+        if (generateButton.disabled) return;
+        generateButton.disabled = true;
+        generateButton.textContent = '生成中…';
+        detailPanelView.busy = true;
+        try {
+          suppressLocalTaskEvent(currentTask.id);
+          const result = await api(`/tasks/${currentTask.id}/sessions/${currentSession.id}/log`, { method: 'POST', body: {} });
+          if (result.skipped) consumeLocalTaskEvent(currentTask.id);
+          toast(result.skipped ? '没有新的会话内容，未重新生成会话日志' : '会话日志已生成');
+          replaceTaskSnapshot(result.task);
+          const updatedSession = result.task.sessions?.find((item) => item.id === currentSession.id);
+          render(result.task, updatedSession || currentSession, true);
+        } catch (error) {
+          toast(error.message, 'error');
+          consumeLocalTaskEvent(currentTask.id);
+          generateButton.disabled = false;
+          generateButton.textContent = generateLabel;
+        } finally {
+          if (detailPanelView) detailPanelView.busy = false;
+        }
+      };
+    }
+  };
+  render(task, session);
 }
 function openDeleteTaskModal(task) {
   const runningCount = runningSessionCount(task);
@@ -2242,12 +2509,18 @@ async function createChildSession(task) {
 }
 function openNewSessionModal(workingDir = null) {
   const tasks = state.tasks.filter((task) => task.status !== 'archived'
-    && (workingDir === null || (task.workingDir || '未设置工作路径') === workingDir));
+    && (workingDir === null || (task.workingDir || '未设置工作路径') === workingDir)).sort((a, b) => {
+      const statusOrder = { unfinished: 0, done: 1 };
+      return (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+        || sessionTreeTime(b.updatedAt) - sessionTreeTime(a.updatedAt)
+        || sessionTreeCompareText(a.title, b.title)
+        || String(a.id || '').localeCompare(String(b.id || ''));
+    });
   if (!tasks.length) {
     toast(workingDir === null ? '请先新建一个任务' : '此工作路径下没有可用任务', 'error');
     return;
   }
-  const form = modal(`<h2>新建会话</h2><label for="new-session-task-input">所属任务<div class="working-dir-field new-session-task-field"><input id="new-session-task-input" name="taskId" autocomplete="off" readonly aria-autocomplete="list" aria-expanded="false" aria-controls="new-session-task-list" title="点击选择任务" value="${esc(tasks[0].title)}"><span class="new-session-task-dropdown-icon" aria-hidden="true">${ACTION_ICONS.chevronDown}</span><div id="new-session-task-list" class="recent-dir-list hidden" role="listbox" aria-label="现有任务">${tasks.map((task) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name" role="option" data-new-session-task-id="${esc(task.id)}" aria-selected="${task.id === tasks[0].id}">${esc(task.title)}</button></div>`).join('')}</div></div><span class="field-error hidden" data-error-for="new-session-task-input" role="alert"></span></label><label for="new-session-title-input">会话名称<input id="new-session-title-input" name="sessionTitle" autocomplete="off" value="新会话" placeholder="例如：检查登录模块…"><span class="field-error hidden" data-error-for="new-session-title-input" role="alert"></span></label><div class="modal-actions"><button type="button" class="primary" id="create-new-session">创建并进入终端</button><button type="button" data-close>取消</button></div>`);
+  const form = modal(`<h2>新建会话</h2><label for="new-session-task-input">所属任务<div class="working-dir-field new-session-task-field"><input id="new-session-task-input" name="taskId" autocomplete="off" readonly aria-autocomplete="list" aria-expanded="false" aria-controls="new-session-task-list" title="点击选择任务" value="${esc(tasks[0].title)}"><span class="new-session-task-dropdown-icon" aria-hidden="true">${ACTION_ICONS.chevronDown}</span><div id="new-session-task-list" class="recent-dir-list hidden" role="listbox" aria-label="现有任务">${tasks.map((task) => `<div class="recent-dir-option"><button type="button" class="recent-dir-option-name new-session-task-option" role="option" data-new-session-task-id="${esc(task.id)}" aria-selected="${task.id === tasks[0].id}">${taskSwitchStatusIcon(task.status)}<span class="new-session-task-option-label">${esc(task.title)}</span></button></div>`).join('')}</div></div><span class="field-error hidden" data-error-for="new-session-task-input" role="alert"></span></label><label for="new-session-title-input">会话名称<input id="new-session-title-input" name="sessionTitle" autocomplete="off" value="新会话" placeholder="例如：检查登录模块…"><span class="field-error hidden" data-error-for="new-session-title-input" role="alert"></span></label><div class="modal-actions"><button type="button" class="primary" id="create-new-session">创建并进入终端</button><button type="button" data-close>取消</button></div>`);
   form.classList.add('new-session-modal');
   $('[data-close]', form).onclick = closeModal;
   const taskInput = $('#new-session-task-input', form);
@@ -2381,7 +2654,16 @@ async function closeSessionTaskSessions(task) {
   }
 }
 function handleSessionTaskAction(task) {
-  return sessionTaskHasRunningSessions(task) ? closeSessionTaskSessions(task) : hideSessionTask(task);
+  if (sessionTaskHasRunningSessions(task)) {
+    void closeSessionTaskSessions(task);
+    return;
+  }
+  const form = modal(`<h2>从会话列表移除任务</h2><p>确定将任务「${esc(task.title)}」及其子会话从会话列表移除吗？任务和会话数据不会被删除。</p><div class="modal-actions"><button type="button" class="danger" id="confirm-session-task-action">移除任务</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-session-task-action', form).onclick = () => {
+    closeModal();
+    hideSessionTask(task);
+  };
 }
 function hideSessionPath(path) {
   const tasks = sessionTasks().filter((task) => (task.workingDir || '未设置工作路径') === path);
@@ -2417,7 +2699,17 @@ async function closeSessionPathSessions(path) {
 }
 function handleSessionPathAction(path) {
   const tasks = sessionTasks().filter((task) => (task.workingDir || '未设置工作路径') === path);
-  return tasks.some(sessionTaskHasRunningSessions) ? closeSessionPathSessions(path) : hideSessionPath(path);
+  if (tasks.some(sessionTaskHasRunningSessions)) {
+    void closeSessionPathSessions(path);
+    return;
+  }
+  const label = workingPathLabel(path === '未设置工作路径' ? '' : path);
+  const form = modal(`<h2>从会话列表移除工作路径</h2><p>确定将工作路径「${esc(label)}」及其子会话从会话列表移除吗？任务和会话数据不会被删除。</p><div class="modal-actions"><button type="button" class="danger" id="confirm-session-path-action">移除工作路径</button><button type="button" data-close>取消</button></div>`);
+  $('[data-close]', form).onclick = closeModal;
+  $('#confirm-session-path-action', form).onclick = () => {
+    closeModal();
+    hideSessionPath(path);
+  };
 }
 function markSessionRead(taskId, sessionId, { keepalive = false } = {}) {
   if (!taskId || !sessionId) return;
@@ -3095,9 +3387,7 @@ async function reconnectTreeSession(taskId, sessionId) {
   if (state.module !== 'session' || state.sessionTask !== taskId || state.sessionSessionId !== sessionId) return selectSession(taskId, sessionId);
   return restartCurrentTui('正在重新连接会话…');
 }
-async function closeOrDeleteSession(task, sessionId) {
-  const session = availableSessions(task).find((item) => item.id === sessionId);
-  if (!session) return;
+async function performCloseOrDeleteSession(task, sessionId, session) {
   const current = state.sessionTask === task.id && state.sessionSessionId === sessionId;
   try {
     if (session.running) {
@@ -3119,6 +3409,15 @@ async function closeOrDeleteSession(task, sessionId) {
   } catch (error) {
     toast(error.message, 'error');
   }
+}
+function closeOrDeleteSession(task, sessionId) {
+  const session = availableSessions(task).find((item) => item.id === sessionId);
+  if (!session) return;
+  if (session.running) {
+    void performCloseOrDeleteSession(task, sessionId, session);
+    return;
+  }
+  openDeleteSessionModal(task, sessionId);
 }
 async function toggleSessionFavorite(task, session) {
   try {
@@ -3279,11 +3578,18 @@ $('#task-list').onclick = async (event) => {
           showSessionTask(task.id);
           await selectSession(task.id, session.id);
           break;
+        case 'toggle-session-restorable':
+          await api(`/tasks/${task.id}/sessions/${session.id}`, { method: 'PATCH', body: { restorableWithTask: !session.restorableWithTask } });
+          await refresh();
+          break;
         case 'toggle-session-favorite':
           await toggleSessionFavorite(task, session);
           break;
         case 'rename-session':
           openSessionModal(task, session);
+          break;
+        case 'session-detail':
+          openSessionDetailPanel(task, session);
           break;
         case 'delete-session-card':
           openDeleteSessionModal(task, session.id);
@@ -3318,6 +3624,7 @@ $('#task-list').onclick = async (event) => {
     if (!note) return;
     try {
       if (button.dataset.action === 'edit-note') openNoteForm(note);
+      else if (button.dataset.action === 'note-detail') openNoteDetailPanel(note);
       else if (button.dataset.action === 'delete-note') openDeleteNoteModal(note);
       else if (button.dataset.action === 'restore-note') { await api(`/notes/${note.id}/restore`, { method: 'POST' }); await refresh(); toast('便签已恢复'); }
       else if (button.dataset.action === 'purge-note') { await api(`/notes/${note.id}/permanent`, { method: 'DELETE' }); await refresh(); toast('便签已永久删除'); }
@@ -3357,11 +3664,8 @@ $('#task-list').onclick = async (event) => {
       }
     }
     else if (button.dataset.action === 'edit') openTaskForm(task);
+    else if (button.dataset.action === 'task-detail') openTaskDetailPanel(task);
     else if (button.dataset.action === 'delete') openDeleteTaskModal(task);
-    else if (button.dataset.action === 'open-archived-session') {
-      await openTaskSession(task);
-      toast('已进入子会话，任务仍为废弃状态');
-    }
     else if (button.dataset.action === 'restore') {
       const restoredTask = await restoreTask(task);
       const restoredLabel = STATUS[restoredTask?.status]?.label || '已恢复';
@@ -3380,6 +3684,18 @@ $('#task-list').onclick = async (event) => {
 $('#purge-archived').onclick = () => openClearArchivedModal();
 
 let refreshTimer = null;
+const suppressedTaskEvents = new Map();
+function suppressLocalTaskEvent(taskId) {
+  if (!taskId) return;
+  clearTimeout(suppressedTaskEvents.get(taskId));
+  suppressedTaskEvents.set(taskId, setTimeout(() => suppressedTaskEvents.delete(taskId), 300000));
+}
+function consumeLocalTaskEvent(taskId) {
+  if (!suppressedTaskEvents.has(taskId)) return false;
+  clearTimeout(suppressedTaskEvents.get(taskId));
+  suppressedTaskEvents.delete(taskId);
+  return true;
+}
 function scheduleRefresh(delay = 100) {
   if (refreshTimer) return;
   refreshTimer = setTimeout(() => { refreshTimer = null; void refresh(); }, delay);
@@ -3388,7 +3704,10 @@ const taskEvents = new EventSource('/api/events');
 taskEvents.onmessage = ({ data }) => {
   try {
     const event = JSON.parse(data);
-    if (event.type === 'tasks_changed') scheduleRefresh();
+    if (event.type === 'tasks_changed') {
+      if (consumeLocalTaskEvent(event.taskId)) return;
+      scheduleRefresh();
+    }
   } catch { /* ignore malformed event */ }
 };
 document.addEventListener('visibilitychange', () => {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f6f6f6">
   <title>Agent 工作台 · 本机 AI</title>
-  <link rel="stylesheet" href="style.css?v=status-icons-svg-566">
+  <link rel="stylesheet" href="style.css?v=detail-log-clear-591">
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
 </head>
 <body>
@@ -52,11 +52,13 @@
         </div></div>
       </section>
     </main>
+    <aside id="detail-panel" class="detail-panel" aria-hidden="true"></aside>
+    <section id="detail-panel-body" class="detail-panel-body-wrap" aria-hidden="true"></section>
     <div class="bottom-bar-controls">
       <div class="sidebar-header"><div class="sidebar-header-actions"><nav id="workspace-module-nav" class="workspace-module-nav" aria-label="工作区入口"><button id="workspace-module-session" class="workspace-module-button" type="button" title="上次打开的会话" aria-label="上次打开的会话" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 3z"/><path d="M8 9h8M8 12h5"/></svg></button><button id="workspace-module-notes" class="workspace-module-button" type="button" title="便签看板" aria-label="便签看板" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M15 4v4h4M9 12h6M9 16h4"/></svg></button><button id="workspace-module-tasks" class="workspace-module-button" type="button" title="任务看板" aria-label="任务看板" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/></svg></button></nav><button id="session-tree-group-toggle" class="workspace-module-button" type="button" title="切换会话列表分组方式" aria-label="切换会话列表分组方式"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="15.5" width="16" height="4" rx="1"/></svg></button><button id="session-tree-search-toggle" class="workspace-module-button" type="button" title="搜索任务或会话" aria-label="搜索任务或会话" aria-expanded="false" aria-controls="session-tree-search-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/></svg></button><button id="session-tree-sort-toggle" class="workspace-module-button" type="button" title="排序会话树" aria-label="排序会话树" aria-expanded="false" aria-controls="session-tree-sort-menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/><path d="m17 15 3 3 3-3M20 18V6"/></svg></button></div></div><div id="session-tree-search-panel" class="session-tree-tool-panel hidden" role="search" aria-label="会话树搜索"><label for="session-tree-search-input">搜索任务或会话</label><div class="session-tree-search-row"><input id="session-tree-search-input" type="search" autocomplete="off" placeholder="输入任务名称或会话名称…"><button id="session-tree-search-clear" type="button" title="清除搜索" aria-label="清除搜索">×</button></div></div><div id="session-tree-sort-menu" class="session-tree-tool-panel session-tree-sort-menu hidden" role="menu" aria-label="会话树排序"><div class="session-tree-tool-title">会话树排序</div><button type="button" role="menuitemradio" data-session-sort="created" aria-checked="false">按创建时间</button><button type="button" role="menuitemradio" data-session-sort="updated" aria-checked="false">按最近更新</button><button type="button" role="menuitemradio" data-session-sort="title" aria-checked="false">按标题名称</button><button type="button" role="menuitemradio" data-session-sort="path" aria-checked="false">按工作路径</button><button type="button" role="menuitemradio" data-session-sort="color" aria-checked="false">按颜色标签</button><button type="button" role="menuitemradio" data-session-sort="status" aria-checked="false">按任务状态</button></div>
     </div>
     <footer class="session-bottom-bar">
 <div id="session-note-buttons" class="session-note-buttons" aria-label="会话便签"></div><div id="topbar-note-buttons" class="session-note-buttons topbar-note-buttons" aria-label="提醒便签"></div><div id="toast-root" role="status" aria-live="polite" aria-atomic="true"><div id="note-marquee" class="note-marquee" aria-label="通知消息框" aria-hidden="true"></div></div></footer></div><div id="modal-root"></div>
-  <script type="module" src="app.js?v=status-icons-svg-566"></script>
+  <script type="module" src="app.js?v=detail-log-clear-591"></script>
 </body>
 </html>
